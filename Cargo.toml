@@ -1,0 +1,6 @@
+[package]
+name = "pyvsb-to-cloud"
+version = "0.1.0"
+authors = ["Dmitry Konishchev"]
+
+[dependencies]
