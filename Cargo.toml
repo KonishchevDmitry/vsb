@@ -4,3 +4,8 @@ version = "0.1.0"
 authors = ["Dmitry Konishchev"]
 
 [dependencies]
+ansi_term = "*"
+atty = "*"
+chrono = "*"
+fern = "*"
+log = "*"
