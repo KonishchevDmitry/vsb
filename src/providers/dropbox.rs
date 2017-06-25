@@ -1,12 +1,15 @@
 use std::env;
 use std::io::{self, Write};
 
-use core::EmptyResult;
+use core::{EmptyResult, GenericError, GenericResult};
 
-use futures::{Future, Stream};
-use hyper::{Client, Method, Request};
+use futures::{self, Future, Stream};
+use hyper::{Client, Method, Request, Response, Error};
 use hyper::header::{UserAgent, Authorization, Bearer, ContentLength, ContentType};
 use hyper_tls::HttpsConnector;
+use mime;
+use serde::ser;
+use serde_json;
 use tokio_core::reactor::Core;
 
 pub struct Dropbox {
@@ -25,6 +28,17 @@ impl Dropbox {
     }
 
     fn test(&mut self) -> EmptyResult {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            path: &'a str,
+        }
+
+        self.json_request("/files/list_folder", &Request{path: ""})?;
+
+        Ok(())
+    }
+
+    fn json_request<T: ser::Serialize>(&mut self, path: &str, request: &T) -> EmptyResult {
         let handle = self.core.handle();
 
         let client = Client::configure()
@@ -33,36 +47,39 @@ impl Dropbox {
 
         let uri = "https://api.dropboxapi.com/2/files/list_folder".parse()?;
 
-        let json = r#"{"path":""}"#;
+        let json = serde_json::to_string(request)?;
 
-        let mut request = Request::new(Method::Post, uri);
-        request.headers_mut().set(UserAgent::new("pyvsb-to-cloud"));
-        request.headers_mut().set(Authorization(Bearer {
+        let mut http_request = Request::new(Method::Post, uri);
+        http_request.headers_mut().set(UserAgent::new("pyvsb-to-cloud"));
+        http_request.headers_mut().set(Authorization(Bearer {
             token: self.access_token.to_owned(),
         }));
-        request.headers_mut().set(ContentType::json());
-        request.headers_mut().set(ContentLength(json.len() as u64));
-        request.set_body(json);
+        http_request.headers_mut().set(ContentType::json());
+        http_request.headers_mut().set(ContentLength(json.len() as u64));
+        http_request.set_body(json);
 
-        let post = client.request(request).and_then(|res| {
-            println!("POST: {}", res.status());
-            res.body().concat2()
+        let post = client.request(http_request).map_err(|e| -> GenericError { From::from(e.to_string()) }).and_then(|response: Response| {
+            println!("POST: {}", response.status());
+            {
+                let content_type = response.headers().get::<ContentType>().unwrap();
+                if content_type.type_() == mime::TEXT && content_type.subtype() == mime::PLAIN {
+//                    panic!("some error");
+                    return futures::future::err(From::from("some-error-occurred"));
+                }
+            }
+
+            futures::future::ok(response)
+        }).and_then(|response: Response| {
+            response.body().concat2().map_err(|e| -> GenericError {From::from(e.to_string())})
+        }).and_then(|body| {
+            println!("> {}", String::from_utf8(body.to_vec()).unwrap());
+            futures::future::ok(())
         });
-
-//        let work = client.get(uri).and_then(|res| {
-//            println!("Response: {}", res.status());
-//
-//            res.body().for_each(|chunk| {
-//                io::stdout()
-//                    .write_all(&chunk)
-//                    .map(|_| ())
-//                    .map_err(From::from)
-//            })
-//        });
 
         let result = self.core.run(post);
 
-        println!(">>> {}", String::from_utf8(result.unwrap().to_vec())?);
+//        println!(">>> {}", String::from_utf8(result.unwrap().to_vec())?);
+        println!(">>> {}", result.unwrap_err());
 
         Ok(())
     }
