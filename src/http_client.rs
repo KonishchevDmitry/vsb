@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
-use std::io::{self, Write};
 
-use core::{EmptyResult, GenericResult};
+use core::GenericResult;
 
 use futures::Stream;
 use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::client::HttpConnector;
-use hyper::header::{Header, UserAgent, Authorization, Bearer, ContentLength, ContentType};
+use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper_tls::HttpsConnector;
 use mime;
 use serde::{ser, de};
@@ -42,10 +41,10 @@ impl HttpClient {
         self
     }
 
-    pub fn json_request<Req, Resp, E>(&self, url: &str, request: &Req) -> Result<Resp, HttpClientError<E>>
-        where Req: ser::Serialize,
-              Resp: de::DeserializeOwned,
-              E: de::DeserializeOwned + fmt::Debug,
+    pub fn json_request<I, O, E>(&self, url: &str, request: &I) -> Result<O, HttpClientError<E>>
+        where I: ser::Serialize,
+              O: de::DeserializeOwned,
+              E: de::DeserializeOwned + Error,
     {
         let method = Method::Post;
         let url = url.parse().map_err(HttpClientError::generic_from)?;
@@ -81,7 +80,7 @@ impl HttpClient {
         if status != StatusCode::Ok {
             return if status.is_client_error() || status.is_server_error() {
                 Err(HttpClientError::Api(
-                    parse_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
+                    parse_api_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
             } else {
                 Err!("Server returned an error: {}", status)
             }
@@ -103,25 +102,22 @@ impl<T> HttpClientError<T> {
     fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
         HttpClientError::Generic(error.to_string())
     }
-//    fn generic_from<E: Error>(error: E) -> HttpClientError<T> {
-//        HttpClientError::Generic(error.to_string())
-//    }
 }
 
-// FIXME
-impl<T: fmt::Debug> Error for HttpClientError<T> {
+impl<T: Error> Error for HttpClientError<T> {
     fn description(&self) -> &str {
-        "HTTP client error"
+        match *self {
+            HttpClientError::Generic(_) => "HTTP client generic error",
+            HttpClientError::Api(ref e) => e.description(),
+        }
     }
 }
 
-// FIXME
-impl<T> fmt::Display for HttpClientError<T> {
+impl<T: fmt::Display> fmt::Display for HttpClientError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::HttpClientError::*;
         match *self {
-            Generic(ref err) => write!(f, "{}", err),
-            Api(ref err) => write!(f, "HACK"),  // FIXME
+            HttpClientError::Generic(ref err) => write!(f, "{}", err),
+            HttpClientError::Api(ref err) => err.fmt(f),
         }
     }
 }
@@ -133,7 +129,7 @@ impl<T> From<String> for HttpClientError<T> {
     }
 }
 
-fn parse_error<T>(status: StatusCode, content_type: Option<ContentType>, body: &str) -> GenericResult<T>
+fn parse_api_error<T>(status: StatusCode, content_type: Option<ContentType>, body: &str) -> GenericResult<T>
     where T: de::DeserializeOwned
 {
     let content_type = content_type.ok_or_else(|| format!(
