@@ -4,7 +4,7 @@ use core::{EmptyResult, GenericResult};
 
 use hyper::header::{Authorization, Bearer};
 
-use http_client::HttpClient;
+use http_client::{HttpClient, HttpClientError};
 
 pub struct Dropbox {
     client: HttpClient,
@@ -27,8 +27,18 @@ impl Dropbox {
             path: &'a str,
         }
 
-        self.client.json_request("https://api.dropboxapi.com/2/files/list_folder", &Request{path: ""})?;
+        #[derive(Deserialize)]
+        struct Response {
+        }
+
+        let result = self.client.json_request::<Request, Response, DropboxApiError>(
+            "https://api.dropboxapi.com/2/files/list_folder", &Request{path: ""})?;
 
         Ok(())
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct DropboxApiError {
+    test: i32
 }
