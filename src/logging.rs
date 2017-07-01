@@ -20,7 +20,9 @@ pub fn init() -> Result<(), SetLoggerError> {
         .chain(std::io::stderr());
 
     Dispatch::new()
-        .level(if debug_mode {
+        // FIXME
+        .level(LogLevelFilter::Error)
+        .level_for("pyvsb_to_cloud", if debug_mode {
             LogLevelFilter::Trace
         } else {
             LogLevelFilter::Info

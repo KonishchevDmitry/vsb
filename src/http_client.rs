@@ -47,41 +47,24 @@ impl HttpClient {
               Resp: de::DeserializeOwned,
               E: de::DeserializeOwned + fmt::Debug,
     {
+        let method = Method::Post;
+        let url = url.parse().map_err(HttpClientError::generic_from)?;
+        let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
+        trace!("Sending {method} {url} {request}...", method=method, url=url, request=request_json);
+
         let mut core = self.core.borrow_mut();
+        let mut http_request = Request::new(method, url);
 
-        let json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
+        http_request.headers_mut().extend(self.default_headers.iter());
+        http_request.headers_mut().set(ContentType::json());
+        http_request.headers_mut().set(ContentLength(request_json.len() as u64));
 
-        let mut http_request = Request::new(
-            Method::Post, url.parse().map_err(HttpClientError::generic_from)?);
-//        http_request.headers_mut().extend(self.default_headers.iter());
-//        http_request.headers_mut().set(ContentType::json());
-//        http_request.headers_mut().set(ContentLength(json.len() as u64));
-        http_request.set_body(json);
+        http_request.set_body(request_json);
 
-//        let post = client.request(http_request).map_err(|e| -> GenericError {From::from(e)}).and_then(|response: Response| {
-//            println!("POST: {}", response.status());
-//            {
-//                let content_type = response.headers().get::<ContentType>().unwrap();
-//                if content_type.type_() == mime::TEXT && content_type.subtype() == mime::PLAIN {
-////                    panic!("some error");
-//                    return futures::future::err(From::from("some-error-occurred"));
-//                }
-//            }
-//
-//            futures::future::ok(response)
-//        }).and_then(|response: Response| {
-//            response.body().concat2()
-//                .map(|chunk: Chunk| (response, chunk))
-//                .map_err(|e| -> GenericError {From::from(e)})
-//        }).and_then(|(response, body): (Response, Chunk)| {
-//            println!("> {}", String::from_utf8(body.to_vec()).unwrap());
-//            futures::future::ok(())
-//        });
-
-        // Response::body() borrows Response, so we have to store all fields that we need later
         let response: Response = core.run(self.client.request(http_request))
             .map_err(HttpClientError::generic_from)?;
 
+        // Response::body() borrows Response, so we have to store all fields that we need later
         let status = response.status();
         let content_type = response.headers().get::<ContentType>().map(
             |header_ref| header_ref.clone());
@@ -91,21 +74,21 @@ impl HttpClient {
         let body: Chunk = core.run(response.body().concat2())
             .map_err(HttpClientError::generic_from)?;
 
-        let body = String::from_utf8(body.to_vec()).map_err(
-            |e| format!("Got an invalid response from server: {}", e))?;
+        let body = String::from_utf8(body.to_vec()).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+        trace!("Got {} response: {}", status, body);
 
         if status != StatusCode::Ok {
             return if status.is_client_error() || status.is_server_error() {
-                // FIXME
-                Err(parse_error(status, content_type, &body).map_err(HttpClientError::generic_from).unwrap_err())
+                Err(HttpClientError::Api(
+                    parse_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
             } else {
                 Err!("Server returned an error: {}", status)
             }
         }
 
-        // FIXME
-        panic!("HACK")
-//        Ok(serde_json::from_str("").map_err(HttpClientError::generic_from)?)
+        Ok(serde_json::from_str(&body).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?)
     }
 }
 
@@ -150,17 +133,9 @@ impl<T> From<String> for HttpClientError<T> {
     }
 }
 
-// FIXME
-//use serde;
-//impl<'de, T> de::Deserialize<'de> for HttpClientError<T> {
-//    fn deserialize<D>(deserializer: D) -> Result<HttpClientError<T>, D::Error>
-//        where D: serde::Deserializer<'de>
-//    {
-//        Ok(HttpClientError::Generic("HACK".to_owned()))
-//    }
-//}
-
-fn parse_error(status: StatusCode, content_type: Option<ContentType>, body: &str) -> EmptyResult {
+fn parse_error<T>(status: StatusCode, content_type: Option<ContentType>, body: &str) -> GenericResult<T>
+    where T: de::DeserializeOwned
+{
     let content_type = content_type.ok_or_else(|| format!(
         "Server returned {} error with an invalid content type", status))?;
 
@@ -169,7 +144,10 @@ fn parse_error(status: StatusCode, content_type: Option<ContentType>, body: &str
         if error.is_empty() {
             error = status.to_string();
         }
-        return Err!("Server returned an error: {}", error)
+        return Err!("Server returned an error: {}", error);
+    } else if content_type.type_() == mime::APPLICATION && content_type.subtype() == mime::JSON {
+        return Ok(serde_json::from_str(body).map_err(|e| format!(
+            "Server returned an invalid JSON response: {}", e))?);
     }
 
     Err!("Server returned {} error with an invalid content type: {}",

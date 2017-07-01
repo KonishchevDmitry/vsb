@@ -27,12 +27,18 @@ impl Dropbox {
             path: &'a str,
         }
 
-        #[derive(Deserialize)]
+        #[derive(Debug, Deserialize)]
         struct Response {
         }
 
         let result = self.client.json_request::<Request, Response, DropboxApiError>(
-            "https://api.dropboxapi.com/2/files/list_folder", &Request{path: ""})?;
+            "https://api.dropboxapi.com/2/files/list_folder", &Request{path: "/invalid"});
+
+        if let Err(HttpClientError::Api(ref e)) = result {
+            error!(">>> {}", e.error.path.tag);
+        }
+
+        info!("Response: {:?}", result);
 
         Ok(())
     }
@@ -40,5 +46,17 @@ impl Dropbox {
 
 #[derive(Debug, Deserialize)]
 struct DropboxApiError {
-    test: i32
+    error: DropboxError,
+    error_summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DropboxError {
+    path: PathError,
+}
+
+#[derive(Debug, Deserialize)]
+struct PathError {
+    #[serde(rename = ".tag")]
+    tag: String,
 }
