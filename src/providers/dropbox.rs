@@ -10,6 +10,7 @@ use http_client::{HttpClient, HttpClientError};
 use provider::{Provider, File, FileType};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
+const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
 
 pub struct Dropbox {
     client: HttpClient,
