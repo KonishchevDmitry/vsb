@@ -15,6 +15,7 @@ extern crate tokio_core;
 use std::env;
 
 #[macro_use] mod core;
+mod encryptor;
 mod http_client;
 mod logging;
 mod provider;
@@ -25,5 +26,6 @@ fn main() {
     logging::init().expect("Failed to initialize the logging");
     let dropbox = providers::dropbox::Dropbox::new(&env::var("DROPBOX_ACCESS_TOKEN").unwrap()).unwrap();
     let provider: &provider::Provider = &dropbox as &provider::Provider;
-    provider.test();
+    encryptor::Encryptor::new().unwrap();
+//    provider.test();
 }
