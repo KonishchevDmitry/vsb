@@ -9,6 +9,7 @@ use futures::sync::mpsc;
 use hyper::{self, Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::client::HttpConnector;
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
+use hyper::Body;
 use hyper_tls::HttpsConnector;
 use mime;
 use serde::{ser, de};
@@ -92,8 +93,9 @@ impl HttpClient {
     }
 
     // FIXME: Deduplicate code here
-    pub fn upload_request<O, E>(&self, url: &str, headers: &Headers, body: mpsc::Receiver<Result<Chunk, hyper::Error>>) -> Result<O, HttpClientError<E>>
-        where O: de::DeserializeOwned,
+    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I) -> Result<O, HttpClientError<E>>
+        where I: Into<Body>,
+              O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
         let method = Method::Post;

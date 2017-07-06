@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::fmt;
+use std::thread;
 
+use futures::{Future, Sink};
+use hyper::{self, Body, Chunk};
 use hyper::header::{Authorization, Bearer, Headers};
 use serde::ser;
 use serde::de;
@@ -33,8 +36,9 @@ impl Dropbox {
         return self.client.json_request(&url, request);
     }
 
-    fn content_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<ApiError>>
+    fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<ApiError>>
         where I: ser::Serialize,
+              B: Into<Body>,
               O: de::DeserializeOwned,
     {
         let url = CONTENT_ENDPOINT.to_owned() + path;
@@ -43,12 +47,7 @@ impl Dropbox {
         let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
         headers.set_raw("Dropbox-API-Arg", request_json);
 
-        // FIXME
-        use futures::sync::mpsc;
-        let (tx, rx) = mpsc::channel(1);
-        drop(tx);
-
-        return self.client.upload_request(&url, &headers, rx);
+        return self.client.upload_request(&url, &headers, body);
     }
 }
 
@@ -161,26 +160,38 @@ impl Provider for Dropbox {
             mode: &'a str,
         }
 
-        let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{})?;
+        // FIXME
+        use futures::sync::mpsc;
+        let (mut tx, rx) = mpsc::channel(2);
 
-        let response: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
+        thread::spawn(|| {
+            let data: Result<Chunk, hyper::Error> = Ok(From::from("a"));
+            tx = tx.send(data).wait().unwrap();
+            let data: Result<Chunk, hyper::Error> = Ok(From::from("b"));
+            tx = tx.send(data).wait().unwrap();
+            drop(tx);
+        });
+
+        let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{}, "")?;
+
+        let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,
                 offset: 0,
             },
             close: true,
-        })?;
+        }, rx)?;
 
-        let response: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
+        let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,
-                offset: 0,
+                offset: 2,
             },
             commit: Commit {
                 path: "/test",
                 mode: "overwrite",
             },
-        })?;
+        }, "")?;
 
         Ok(())
     }
