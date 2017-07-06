@@ -49,67 +49,43 @@ impl HttpClient {
               E: de::DeserializeOwned + Error,
     {
         let method = Method::Post;
-        let url = url.parse().map_err(HttpClientError::generic_from)?;
         let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
         trace!("Sending {method} {url} {request}...", method=method, url=url, request=request_json);
 
-        let mut core = self.core.borrow_mut();
-        let mut http_request = Request::new(method, url);
+        let mut headers = self.default_headers.clone();
+        headers.set(ContentType::json());
+        headers.set(ContentLength(request_json.len() as u64));
 
-        http_request.headers_mut().extend(self.default_headers.iter());
-        http_request.headers_mut().set(ContentType::json());
-        http_request.headers_mut().set(ContentLength(request_json.len() as u64));
-
-        http_request.set_body(request_json);
-
-        let response: Response = core.run(self.client.request(http_request))
-            .map_err(HttpClientError::generic_from)?;
-
-        // Response::body() borrows Response, so we have to store all fields that we need later
-        let status = response.status();
-        let content_type = response.headers().get::<ContentType>().map(
-            |header_ref| header_ref.clone());
-
-        // FIXME: Use sync methods (send())
-        // FIXME: Limit size
-        let body: Chunk = core.run(response.body().concat2())
-            .map_err(HttpClientError::generic_from)?;
-
-        let body = String::from_utf8(body.to_vec()).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-        trace!("Got {} response: {}", status, body);
-
-        if status != StatusCode::Ok {
-            return if status.is_client_error() || status.is_server_error() {
-                Err(HttpClientError::Api(
-                    parse_api_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
-            } else {
-                Err!("Server returned an error: {}", status)
-            }
-        }
-
-        Ok(serde_json::from_str(&body).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?)
+        self.process_request(method, url, headers, request_json)
     }
 
-    // FIXME: Deduplicate code here
     pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
         let method = Method::Post;
-        let url = url.parse().map_err(HttpClientError::generic_from)?;
         trace!("Sending {method} {url} {headers}...", method=method, url=url, headers=headers);
 
-        let mut core = self.core.borrow_mut();
+        let mut request_headers = self.default_headers.clone();
+        request_headers.set(ContentType::octet_stream());
+        request_headers.extend(headers.iter());
+
+        self.process_request(method, url, request_headers, body)
+    }
+
+    fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I) -> Result<O, HttpClientError<E>>
+        where I: Into<Body>,
+              O: de::DeserializeOwned,
+              E: de::DeserializeOwned + Error,
+    {
+        let url = url.parse().map_err(HttpClientError::generic_from)?;
+
         let mut http_request = Request::new(method, url);
-
-        http_request.headers_mut().extend(self.default_headers.iter());
-        http_request.headers_mut().set(ContentType::octet_stream());
-        http_request.headers_mut().extend(headers.iter());
-
+        *http_request.headers_mut() = headers;
         http_request.set_body(body);
+
+        let mut core = self.core.borrow_mut();
 
         let response: Response = core.run(self.client.request(http_request))
             .map_err(HttpClientError::generic_from)?;
