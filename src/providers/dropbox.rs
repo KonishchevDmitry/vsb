@@ -1,12 +1,13 @@
 use std::error::Error;
 use std::fmt;
 
-use hyper::header::{Authorization, Bearer};
+use hyper::header::{Authorization, Bearer, Headers};
 use serde::ser;
 use serde::de;
+use serde_json;
 
-use core::GenericResult;
-use http_client::{HttpClient, HttpClientError};
+use core::{EmptyResult, GenericResult};
+use http_client::{HttpClient, EmptyResponse, HttpClientError};
 use provider::{Provider, File, FileType};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
@@ -30,6 +31,24 @@ impl Dropbox {
     {
         let url = API_ENDPOINT.to_owned() + path;
         return self.client.json_request(&url, request);
+    }
+
+    fn content_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<ApiError>>
+        where I: ser::Serialize,
+              O: de::DeserializeOwned,
+    {
+        let url = CONTENT_ENDPOINT.to_owned() + path;
+        let mut headers = Headers::new();
+
+        let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
+        headers.set_raw("Dropbox-API-Arg", request_json);
+
+        // FIXME
+        use futures::sync::mpsc;
+        let (tx, rx) = mpsc::channel(1);
+        drop(tx);
+
+        return self.client.upload_request(&url, &headers, rx);
     }
 }
 
@@ -105,6 +124,65 @@ impl Provider for Dropbox {
         }
 
         Ok(Some(files))
+    }
+
+    fn upload_file(&self, path: &str) -> EmptyResult {
+        #[derive(Serialize)]
+        struct StartRequest {
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct StartResponse {
+            session_id: String,
+        }
+
+        #[derive(Serialize)]
+        struct AppendRequest<'a> {
+            cursor: Cursor<'a>,
+            // FIXME
+            close: bool,
+        }
+
+        #[derive(Serialize)]
+        struct FinishRequest<'a> {
+            cursor: Cursor<'a>,
+            commit: Commit<'a>,
+        }
+
+        #[derive(Serialize)]
+        struct Cursor<'a> {
+            session_id: &'a str,
+            offset: u64,
+        }
+
+        #[derive(Serialize)]
+        struct Commit<'a> {
+            path: &'a str,
+            mode: &'a str,
+        }
+
+        let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{})?;
+
+        let response: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
+            cursor: Cursor {
+                session_id: &start_response.session_id,
+                offset: 0,
+            },
+            close: true,
+        })?;
+
+        let response: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
+            cursor: Cursor {
+                session_id: &start_response.session_id,
+                offset: 0,
+            },
+            commit: Commit {
+                path: "/test",
+                mode: "overwrite",
+            },
+        })?;
+
+        Ok(())
     }
 }
 

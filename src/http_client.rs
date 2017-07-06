@@ -5,7 +5,8 @@ use std::fmt;
 use core::GenericResult;
 
 use futures::Stream;
-use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
+use futures::sync::mpsc;
+use hyper::{self, Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::client::HttpConnector;
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper_tls::HttpsConnector;
@@ -89,6 +90,58 @@ impl HttpClient {
         Ok(serde_json::from_str(&body).map_err(|e|
             format!("Got an invalid response from server: {}", e))?)
     }
+
+    // FIXME: Deduplicate code here
+    pub fn upload_request<O, E>(&self, url: &str, headers: &Headers, body: mpsc::Receiver<Result<Chunk, hyper::Error>>) -> Result<O, HttpClientError<E>>
+        where O: de::DeserializeOwned,
+              E: de::DeserializeOwned + Error,
+    {
+        let method = Method::Post;
+        let url = url.parse().map_err(HttpClientError::generic_from)?;
+        trace!("Sending {method} {url} {headers}...", method=method, url=url, headers=headers);
+
+        let mut core = self.core.borrow_mut();
+        let mut http_request = Request::new(method, url);
+
+        http_request.headers_mut().extend(self.default_headers.iter());
+        http_request.headers_mut().set(ContentType::octet_stream());
+        http_request.headers_mut().extend(headers.iter());
+
+        http_request.set_body(body);
+
+        let response: Response = core.run(self.client.request(http_request))
+            .map_err(HttpClientError::generic_from)?;
+
+        // Response::body() borrows Response, so we have to store all fields that we need later
+        let status = response.status();
+        let content_type = response.headers().get::<ContentType>().map(
+            |header_ref| header_ref.clone());
+
+        // FIXME: Use sync methods (send())
+        // FIXME: Limit size
+        let body: Chunk = core.run(response.body().concat2())
+            .map_err(HttpClientError::generic_from)?;
+
+        let body = String::from_utf8(body.to_vec()).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+        trace!("Got {} response: {}", status, body);
+
+        if status != StatusCode::Ok {
+            return if status.is_client_error() || status.is_server_error() {
+                Err(HttpClientError::Api(
+                    parse_api_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
+            } else {
+                Err!("Server returned an error: {}", status)
+            }
+        }
+
+        Ok(serde_json::from_str(&body).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmptyResponse {
 }
 
 #[derive(Debug)]
@@ -99,7 +152,7 @@ pub enum HttpClientError<T> {
 
 // FIXME
 impl<T> HttpClientError<T> {
-    fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
+    pub fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
         HttpClientError::Generic(error.to_string())
     }
 }
