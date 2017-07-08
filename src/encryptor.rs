@@ -1,11 +1,9 @@
 use std::fs::File;
-use std::io::{self, Read, Write, BufReader};
+use std::io::{self, Read, BufReader};
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time;
-
-use nix::{errno, sys};
 
 use core::{EmptyResult, GenericResult};
 use util;
@@ -104,7 +102,7 @@ fn stdout_reader(mut gpg: Child) -> EmptyResult {
 
     stderr_reader.take().unwrap().join().map_err(|e| {
         terminate_gpg(&mut gpg);
-        format!("gpg stderr reading thread has panicked: {}", 3)
+        format!("gpg stderr reading thread has panicked: {:?}.", e)
     })??;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
@@ -116,7 +114,7 @@ fn stdout_reader(mut gpg: Child) -> EmptyResult {
 }
 
 // FIXME
-fn read_data(stdout: BufReader<ChildStdout>) -> EmptyResult {
+fn read_data(_stdout: BufReader<ChildStdout>) -> EmptyResult {
     // FIXME
     let _ = File::create("backup-mock.tar").unwrap();
 
@@ -126,7 +124,7 @@ fn read_data(stdout: BufReader<ChildStdout>) -> EmptyResult {
 fn terminate_gpg(gpg: &mut Child) {
     let pid = gpg.id() as i32;
     match gpg.try_wait() {
-        Ok(Some(status)) => (),
+        Ok(Some(_status)) => (),
         Ok(None) => terminate_gpg_by_pid(pid),
         Err(err) => {
             error!("Failed to wait() a child gpg process: {}", err);

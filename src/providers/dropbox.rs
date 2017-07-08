@@ -188,7 +188,7 @@ impl Provider for Dropbox {
                 offset: 2,
             },
             commit: Commit {
-                path: "/test",
+                path: path,
                 mode: "overwrite",
             },
         }, "")?;

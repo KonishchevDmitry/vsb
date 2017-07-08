@@ -1,12 +1,12 @@
 use std::thread;
-use std::time;
+use std::time::{self, Duration};
 
 use nix::errno;
 use nix::sys;
 
 use core::EmptyResult;
 
-pub fn terminate_process(name: &str, pid: i32, timeout: time::Duration) -> EmptyResult {
+pub fn terminate_process(name: &str, pid: i32, timeout: Duration) -> EmptyResult {
     debug!("Terminating {}...", name);
 
     let mut signal = sys::signal::SIGTERM;
@@ -20,7 +20,7 @@ pub fn terminate_process(name: &str, pid: i32, timeout: time::Duration) -> Empty
                     signal = sys::signal::SIGKILL;
                 }
 
-                thread::sleep_ms(100);
+                thread::sleep(Duration::from_millis(100));
             },
             Err(err) => {
                 if err.errno() == errno::ESRCH {

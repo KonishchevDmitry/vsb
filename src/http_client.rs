@@ -5,8 +5,7 @@ use std::fmt;
 use core::GenericResult;
 
 use futures::Stream;
-use futures::sync::mpsc;
-use hyper::{self, Client, Method, Request, Headers, Response, StatusCode, Chunk};
+use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::client::HttpConnector;
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper::Body;
