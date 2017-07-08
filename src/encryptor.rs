@@ -31,8 +31,12 @@ impl Encryptor {
             process_termination_event: rx,
         };
 
-        match thread::Builder::new().name("encryptor-stdout-reader".into()).spawn(move || {
-            let _ = tx.send(stdout_reader(gpg).map_err(|e| e.to_string()).err());
+        match thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
+            let result = stdout_reader(&mut gpg);
+            if let Err(_) = result {
+                terminate_gpg(&mut gpg);
+            }
+            let _ = tx.send(result.map_err(|e| e.to_string()).err());
         }) {
             Ok(stdout_reader) => encryptor.stdout_reader = Some(stdout_reader),
             Err(err) => return Err!("Unable to spawn a thread: {}", err),
@@ -69,11 +73,9 @@ impl io::Write for Encryptor {
     }
 }
 
-// FIXME
-fn stdout_reader(mut gpg: Child) -> EmptyResult {
+fn stdout_reader(gpg: &mut Child) -> EmptyResult {
     let mut stderr = gpg.stderr.take().unwrap();
-
-    let mut stderr_reader = Some(thread::Builder::new().name("encryptor-stderr-reader".into()).spawn(move || -> EmptyResult {
+    let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
 
         match stderr.read_to_string(&mut error) {
@@ -81,33 +83,29 @@ fn stdout_reader(mut gpg: Child) -> EmptyResult {
                 if size == 0 {
                     Ok(())
                 } else {
-                    Err(From::from(error.trim_right()))
+                    Err!("gpg error: {}", error.trim_right())
                 }
             },
-            Err(err) => Err!("Failed to read from gpg's stderr: {}", err),
+            Err(err) => Err!("gpg stderr reading error: {}", err),
         }
-    }).map_err(|err| {
-        terminate_gpg(&mut gpg);
-        format!("Unable to spawn a thread: {}", err)
-    })?);
+    }).map_err(|err| format!("Unable to spawn a thread: {}", err))?);
 
-    // FIXME: Buf size
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
 
-    read_data(stdout).map_err(|e| {
-        terminate_gpg(&mut gpg);
-        stderr_reader.take().unwrap().join();
-        format!("gpg stdout reading error: {}", e)
+    // FIXME: Check written bytes vs read bytes?
+    read_data(stdout).map_err(|err| {
+        terminate_gpg(gpg);
+        util::join_thread(stderr_reader.take().unwrap());
+        err
     })?;
 
     stderr_reader.take().unwrap().join().map_err(|e| {
-        terminate_gpg(&mut gpg);
         format!("gpg stderr reading thread has panicked: {:?}.", e)
     })??;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
     if !status.success() {
-        return Err!("gpg process has terminated with a non-successful status code")
+        return Err!("gpg process has terminated with an error exit code")
     }
 
     Ok(())

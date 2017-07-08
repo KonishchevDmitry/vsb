@@ -6,6 +6,19 @@ use nix::sys;
 
 use core::EmptyResult;
 
+pub fn join_thread<T>(handle: thread::JoinHandle<T>) {
+    let name = if let Some(name) = handle.thread().name() {
+        name.to_owned()
+    } else {
+        // FIXME: handle.thread().id() is stable since Rust 1.19
+        format!("{:?}", 0)
+    };
+
+    if let Err(err) = handle.join() {
+        error!("{} thread has panicked: {:?}.", name, err)
+    }
+}
+
 pub fn terminate_process(name: &str, pid: i32, timeout: Duration) -> EmptyResult {
     debug!("Terminating {}...", name);
 
