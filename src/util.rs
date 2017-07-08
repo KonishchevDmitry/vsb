@@ -6,7 +6,7 @@ use nix::sys;
 
 use core::EmptyResult;
 
-fn terminate_process(name: &str, pid: i32, timeout: time::Duration) -> EmptyResult {
+pub fn terminate_process(name: &str, pid: i32, timeout: time::Duration) -> EmptyResult {
     debug!("Terminating {}...", name);
 
     let mut signal = sys::signal::SIGTERM;
@@ -26,7 +26,7 @@ fn terminate_process(name: &str, pid: i32, timeout: time::Duration) -> EmptyResu
                 if err.errno() == errno::ESRCH {
                     break;
                 } else {
-                    return Err!("Failed to terminate {}: {}.", name, err);
+                    return Err!("Failed to terminate {}: {}", name, err);
                 }
             },
         }
