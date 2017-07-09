@@ -11,7 +11,7 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
-use provider::{Provider, File, FileType};
+use provider::{ReadProvider, WriteProvider, File, FileType};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
@@ -51,7 +51,7 @@ impl Dropbox {
     }
 }
 
-impl Provider for Dropbox {
+impl ReadProvider for Dropbox {
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
         #[derive(Serialize)]
         struct Request<'a> {
@@ -83,9 +83,9 @@ impl Provider for Dropbox {
 
         loop {
             let response: Response = if let Some(ref cursor) = cursor {
-                self.api_request("/files/list_folder/continue", &ContinueRequest{cursor: &cursor})
+                self.api_request("/files/list_folder/continue", &ContinueRequest { cursor: &cursor })
             } else {
-                let response = self.api_request("/files/list_folder", &Request{path: path});
+                let response = self.api_request("/files/list_folder", &Request { path: path });
 
                 if let Err(HttpClientError::Api(ref e)) = response {
                     if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {
@@ -105,6 +105,7 @@ impl Provider for Dropbox {
                     name: entry.name.clone(),
                     type_: match entry.tag.as_str() {
                         "folder" => FileType::Directory,
+                        // FIXME: other
                         _ => FileType::File,
                     },
                 })
@@ -124,7 +125,9 @@ impl Provider for Dropbox {
 
         Ok(Some(files))
     }
+}
 
+impl WriteProvider for Dropbox {
     fn upload_file(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct StartRequest {
