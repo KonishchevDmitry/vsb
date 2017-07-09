@@ -1,79 +1,111 @@
 use std::fs::File;
-use std::io::{self, Read, BufReader};
+use std::io::{self, Read, BufReader, BufRead, Write, BufWriter};
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
-use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time;
+
+use futures::{Future, Sink};
+use futures::sync::mpsc;
+use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
 use util;
 
 pub struct Encryptor {
-    pid: Option<i32>,
-    stdin: ChildStdin,
-    stdout_reader: Option<JoinHandle<()>>,
-    process_termination_event: mpsc::Receiver<Option<String>>,
+    pid: i32,
+    stdin: Option<BufWriter<ChildStdin>>,
+    stdout_reader: Option<JoinHandle<EmptyResult>>,
+    encrypted_chunks_tx: Option<mpsc::Sender<ChunkResult>>,
 }
 
+type ChunkResult = Result<Chunk, hyper::Error>;
+
 impl Encryptor {
-    pub fn new() -> GenericResult<Encryptor> {
+    pub fn new() -> GenericResult<(Encryptor, mpsc::Receiver<ChunkResult>)> {
+        debug!("Spawning a gpg process to handle data encryption...");
+
+        // One buffer slot is for parallelization or to not block in drop() if we get some error
+        // during dropping the object that hasn't been used yet (hasn't been written to).
+        let (tx, rx) = mpsc::channel(1);
+
         // FIXME
         let mut gpg = Command::new("cat")//.arg("a")
             .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn()?;
 
-        let (tx, rx) = mpsc::channel();
+        let pid = gpg.id() as i32;
+        let stdin = BufWriter::new(gpg.stdin.take().unwrap());
+        let encrypted_chunks_tx = tx.clone();
 
-        let mut encryptor = Encryptor {
-            pid: Some(gpg.id() as i32),
-            stdin: gpg.stdin.take().unwrap(),
-            stdout_reader: None,
-            process_termination_event: rx,
-        };
+        let stdout_reader = thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
+            stdout_reader(gpg, tx)
+        }).map_err(|e| {
+            terminate_gpg_by_pid(pid);
+            format!("Unable to spawn a thread: {}", e)
+        })?;
 
-        match thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
-            let result = stdout_reader(&mut gpg);
-            if let Err(_) = result {
-                terminate_gpg(&mut gpg);
+        Ok((Encryptor {
+            pid: pid,
+            stdin: Some(stdin),
+            stdout_reader: Some(stdout_reader),
+            encrypted_chunks_tx: Some(encrypted_chunks_tx),
+        }, rx))
+    }
+
+    pub fn finish(mut self) -> EmptyResult {
+        self.close()
+    }
+
+    fn close(&mut self) -> EmptyResult {
+        let mut result: EmptyResult = Ok(());
+
+        if let Some(mut stdin) = self.stdin.take() {
+            if let Err(err) = stdin.flush() {
+                result = Err(From::from(err));
             }
-            let _ = tx.send(result.map_err(|e| e.to_string()).err());
-        }) {
-            Ok(stdout_reader) => encryptor.stdout_reader = Some(stdout_reader),
-            Err(err) => return Err!("Unable to spawn a thread: {}", err),
+
+            // Here stdin will be dropped and thus closed, so the gpg process will be expected to
+            // read the remaining data and finish its work as well as our stdout reading thread.
         }
 
-        Ok(encryptor)
+        if let Some(stdout_reader) = self.stdout_reader.take() {
+            if let Err(err) = util::join_thread(stdout_reader) {
+                result = Err(From::from(err));
+                terminate_gpg_by_pid(self.pid);
+            }
+        }
+
+        if let Some(encrypted_chunks_tx) = self.encrypted_chunks_tx.take() {
+            if let Err(ref err) = result {
+                let _ = encrypted_chunks_tx.send(Err(hyper::Error::Io(io::Error::new(
+                    io::ErrorKind::Other, err.to_string()))));
+            }
+        }
+
+        return result;
     }
 }
 
 impl Drop for Encryptor {
     fn drop(&mut self) {
-        if let Some(pid) = self.pid {
-            terminate_gpg_by_pid(pid);
-            self.pid = None;
-        }
-
-        if let Some(stdout_reader) = self.stdout_reader.take() {
-            if let Err(err) = stdout_reader.join() {
-                error!("gpg stdout thread has panicked: {:?}.", err);
-            }
-        }
-        // FIXME
+        let _ = self.close();
     }
 }
 
 impl io::Write for Encryptor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.stdin.write(buf)
+        self.stdin.as_mut().unwrap().write(buf).map(|size| {
+            trace!("Accepted {} bytes of data for encryption.", size);
+            size
+        })
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        // FIXME: ensure properly terminated
-        self.stdin.flush()
+        self.stdin.as_mut().unwrap().flush()
     }
 }
 
-fn stdout_reader(gpg: &mut Child) -> EmptyResult {
+fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
     let mut stderr = gpg.stderr.take().unwrap();
     let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
@@ -93,32 +125,49 @@ fn stdout_reader(gpg: &mut Child) -> EmptyResult {
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
 
     // FIXME: Check written bytes vs read bytes?
-    read_data(stdout).map_err(|err| {
-        terminate_gpg(gpg);
-        util::join_thread(stderr_reader.take().unwrap());
+    read_data(stdout, tx).map_err(|err| {
+        terminate_gpg(&mut gpg);
+        util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
     })?;
 
-    stderr_reader.take().unwrap().join().map_err(|e| {
-        format!("gpg stderr reading thread has panicked: {:?}.", e)
-    })??;
+    util::join_thread(stderr_reader.take().unwrap())?;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
-    if !status.success() {
+    if status.success() {
+        debug!("gpg process has terminated with successful exit code.")
+    } else {
         return Err!("gpg process has terminated with an error exit code")
     }
 
     Ok(())
 }
 
-// FIXME
-fn read_data(_stdout: BufReader<ChildStdout>) -> EmptyResult {
+fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
     // FIXME
-    let _ = File::create("backup-mock.tar").unwrap();
+    let mut out = File::create("backup-mock.tar").unwrap();
+
+    loop {
+        let size = {
+            let data = stdout.fill_buf().map_err(|e| format!("gpg stdout reading error: {}", e))?;
+            if data.len() == 0 {
+                break;
+            }
+
+            trace!("Got {} bytes of encrypted data.", data.len());
+            out.write_all(data)?;
+
+            tx = tx.send(Ok(From::from(data.to_vec()))).wait()?;
+
+            data.len()
+        };
+        stdout.consume(size);
+    }
 
     Ok(())
 }
 
+// FIXME: wait to eliminate zombie processes
 fn terminate_gpg(gpg: &mut Child) {
     let pid = gpg.id() as i32;
     match gpg.try_wait() {
@@ -131,6 +180,7 @@ fn terminate_gpg(gpg: &mut Child) {
     };
 }
 
+// FIXME: wait to eliminate zombie processes
 fn terminate_gpg_by_pid(pid: i32) {
     let termination_timeout = time::Duration::from_secs(3);
     if let Err(err) = util::terminate_process("a child gpg process", pid, termination_timeout) {

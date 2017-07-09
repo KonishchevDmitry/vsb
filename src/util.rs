@@ -4,18 +4,34 @@ use std::time::{self, Duration};
 use nix::errno;
 use nix::sys;
 
-use core::EmptyResult;
+use core::{EmptyResult, GenericResult};
 
-pub fn join_thread<T>(handle: thread::JoinHandle<T>) {
-    let name = if let Some(name) = handle.thread().name() {
-        name.to_owned()
-    } else {
-        // FIXME: handle.thread().id() is stable since Rust 1.19
-        format!("{:?}", 0)
-    };
+pub fn join_thread<T>(handle: thread::JoinHandle<GenericResult<T>>) -> GenericResult<T> {
+    let name = get_thread_name(handle.thread());
+    match handle.join() {
+        Ok(result) => result,
+        Err(err) => {
+            let error = format!("{} thread has panicked: {:?}", name, err);
+            error!("{}.", error);
+            Err(From::from(error))
+        },
+    }
+}
 
+pub fn join_thread_ignoring_result<T>(handle: thread::JoinHandle<T>) {
+    let name = get_thread_name(handle.thread());
     if let Err(err) = handle.join() {
         error!("{} thread has panicked: {:?}.", name, err)
+    }
+}
+
+fn get_thread_name(thread: &thread::Thread) -> String {
+    match thread.name() {
+        Some(name) => name.to_owned(),
+        None => {
+            // FIXME: handle.thread().id() is stable since Rust 1.19
+            format!("{:?}", 0)
+        }
     }
 }
 

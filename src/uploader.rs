@@ -1,4 +1,4 @@
-use std::io::{Write, BufWriter};
+use std::io::Write;
 
 use tar;
 
@@ -18,10 +18,14 @@ impl Uploader {
 
     // FIXME
     pub fn test(&self) {
-        let encryptor = Encryptor::new().unwrap();
-        let mut a = tar::Builder::new(BufWriter::new(encryptor));
+        let (encryptor, chunks) = Encryptor::new().unwrap();
+        drop(chunks);
+        // FIXME: check chunks drop + write
 
-        a.append_dir_all("backup", "backup-mock").unwrap();
-        a.into_inner().unwrap().flush().unwrap();
+        let mut archive = tar::Builder::new(encryptor);
+        archive.append_dir_all("backup", "backup-mock").unwrap();
+
+        let mut encryptor = archive.into_inner().unwrap();
+        encryptor.finish().map_err(|e| format!("Got an error: {}", e)).unwrap();
     }
 }
