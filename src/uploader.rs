@@ -19,8 +19,7 @@ impl Uploader {
     // FIXME
     pub fn test(&self) {
         let (encryptor, chunks) = Encryptor::new().unwrap();
-        drop(chunks);
-        // FIXME: check chunks drop + write
+//        drop(chunks);
 
         let mut archive = tar::Builder::new(encryptor);
         archive.append_dir_all("backup", "backup-mock").unwrap();
