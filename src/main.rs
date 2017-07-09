@@ -25,16 +25,21 @@ mod logging;
 mod provider;
 mod providers;
 mod storage;
-mod uploader;
+mod sync;
 mod util;
+
+use providers::dropbox::Dropbox;
+use providers::filesystem::Filesystem;
+use storage::Storage;
 
 // FIXME
 fn main() {
     logging::init().expect("Failed to initialize the logging");
-    let dropbox = providers::dropbox::Dropbox::new(&env::var("DROPBOX_ACCESS_TOKEN")
-        .expect("DROPBOX_ACCESS_TOKEN environment variable is not set")).unwrap();
-    let filesystem = providers::filesystem::Filesystem::new("/Users/konishchev/.backup");
-//    encryptor::Encryptor::new().unwrap();
-    let uploader = uploader::Uploader::new(storage::Storage::new_read_only(filesystem), storage::Storage::new(dropbox));
-    uploader.test();
+
+    let local_storage = Storage::new_read_only(Filesystem::new("/Users/konishchev/.backup"));
+
+    let mut cloud_storage = Storage::new(Dropbox::new(&env::var("DROPBOX_ACCESS_TOKEN")
+        .expect("DROPBOX_ACCESS_TOKEN environment variable is not set")).unwrap());
+
+    sync::sync_backups(&local_storage, &mut cloud_storage);
 }
