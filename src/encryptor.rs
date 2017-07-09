@@ -40,7 +40,7 @@ impl Encryptor {
         let stdout_reader = thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
             stdout_reader(gpg, tx)
         }).map_err(|e| {
-            terminate_gpg_by_pid(pid);
+            terminate_gpg(pid);
             format!("Unable to spawn a thread: {}", e)
         })?;
 
@@ -71,7 +71,7 @@ impl Encryptor {
         if let Some(stdout_reader) = self.stdout_reader.take() {
             if let Err(err) = util::join_thread(stdout_reader) {
                 result = Err(From::from(err));
-                terminate_gpg_by_pid(self.pid);
+                terminate_gpg(self.pid);
             }
         }
 
@@ -124,9 +124,8 @@ fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
 
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
 
-    // FIXME: Check written bytes vs read bytes?
     read_data(stdout, tx).map_err(|err| {
-        terminate_gpg(&mut gpg);
+        terminate_gpg(gpg.id() as i32);
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
     })?;
@@ -167,21 +166,7 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResul
     Ok(())
 }
 
-// FIXME: wait to eliminate zombie processes
-fn terminate_gpg(gpg: &mut Child) {
-    let pid = gpg.id() as i32;
-    match gpg.try_wait() {
-        Ok(Some(_status)) => (),
-        Ok(None) => terminate_gpg_by_pid(pid),
-        Err(err) => {
-            error!("Failed to wait() a child gpg process: {}", err);
-            terminate_gpg_by_pid(pid);
-        }
-    };
-}
-
-// FIXME: wait to eliminate zombie processes
-fn terminate_gpg_by_pid(pid: i32) {
+fn terminate_gpg(pid: i32) {
     let termination_timeout = time::Duration::from_secs(3);
     if let Err(err) = util::terminate_process("a child gpg process", pid, termination_timeout) {
         error!("{}.", err)

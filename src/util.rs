@@ -63,5 +63,11 @@ pub fn terminate_process(name: &str, pid: i32, timeout: Duration) -> EmptyResult
 
     debug!("Successfully terminated {}.", name);
 
+    if let Err(err) = sys::wait::waitpid(pid, Some(sys::wait::WNOHANG)) {
+        if err.errno() != errno::ECHILD {
+            return Err!("Failed to wait() {}: {}", name, err)
+        }
+    }
+
     Ok(())
 }
