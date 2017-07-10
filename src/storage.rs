@@ -1,33 +1,114 @@
-use core::GenericResult;
-use provider::{ReadProvider, WriteProvider};
+use std::cmp::Ord;
 
-#[derive(Debug)]
-pub struct BackupGroup {
-    pub backups: Vec<String>,
-}
+use regex::{self, Regex};
+
+use core::GenericResult;
+use provider::{ProviderType, ReadProvider, WriteProvider, FileType};
 
 pub struct Storage {
     provider: Box<AbstractProvider>,
+    path: String,
 }
 
 impl Storage {
-    pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T) -> Storage {
+    pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> Storage {
         Storage {
             provider: Box::new(ReadWriteProviderAdapter{provider: provider}),
+            path: path.to_owned(),
         }
     }
 
-    pub fn new_read_only<T: ReadProvider +'static>(provider: T) -> Storage {
+    pub fn new_read_only<T: ReadProvider +'static>(provider: T, path: &str) -> Storage {
         Storage {
             provider: Box::new(ReadOnlyProviderAdapter{provider: provider}),
+            path: path.to_owned(),
         }
     }
 
-    // FIXME
-    pub fn get_backup_groups(&self) -> GenericResult<Vec<BackupGroup>> {
-        self.provider.read().list_directory("fsf")?;
-        panic!("FIXME")
+    pub fn provider_name(&self) -> &str {
+        self.provider.read().name()
     }
+
+    pub fn get_backup_groups(&self) -> GenericResult<Vec<BackupGroup>> {
+        lazy_static! {
+            static ref backup_group_re: Regex = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$").unwrap();
+        }
+
+        let provider = self.provider.read();
+        let mut backup_groups = Vec::new();
+
+        let files = provider.list_directory(&self.path)?.ok_or_else(|| format!(
+            "Backup root {:?} doesn't exist", self.path))?;
+
+        for file in files {
+            if file.name.starts_with('.') {
+                continue
+            }
+
+            let group_path = self.path.trim_right_matches('/').to_owned() + "/" + &file.name;
+
+            match file.type_ {
+                FileType::Directory if backup_group_re.is_match(&file.name) => {
+                    backup_groups.push(BackupGroup {
+                        name: file.name,
+                        backups: get_backups(provider, &group_path)?,
+                    });
+                },
+                _ => {
+                    error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
+                        self.path, provider.name(), file.type_, file.name);
+                },
+            };
+        }
+
+        backup_groups.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(backup_groups)
+    }
+}
+
+const CLOUD_BACKUP_EXTENSION: &str = ".tar.gpg";
+
+fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<String>> {
+    let mut backups = Vec::new();
+
+    let (backup_file_type, backup_file_extension) = match provider.type_() {
+        ProviderType::Local => (FileType::Directory, ""),
+        ProviderType::Cloud => (FileType::File, CLOUD_BACKUP_EXTENSION),
+    };
+
+    let backup_file_re: Regex = Regex::new(&(
+        r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
+            + &regex::escape(backup_file_extension) + "$"))?;
+
+    let files = provider.list_directory(group_path)?.ok_or_else(|| format!(
+        "Failed to list {:?} backup group: it doesn't exist", group_path))?;
+
+    for file in files {
+        if file.name.starts_with('.') {
+            continue
+        }
+
+        let captures = backup_file_re.captures(&file.name);
+
+        if file.type_ != backup_file_type || captures.is_none() {
+            error!("{:?} backup group on {} contains an unexpected {}: {:?}.",
+                group_path, provider.name(), file.type_, file.name);
+            continue
+        }
+
+        backups.push(captures.unwrap().get(1).unwrap().as_str().to_owned());
+    }
+
+    backups.sort();
+
+    Ok(backups)
+}
+
+#[derive(Debug)]
+pub struct BackupGroup {
+    pub name: String,
+    pub backups: Vec<String>,
 }
 
 // FIXME: Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we

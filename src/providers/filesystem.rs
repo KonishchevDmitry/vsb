@@ -2,21 +2,30 @@ use std::fs;
 use std::io;
 
 use core::{EmptyResult, GenericResult};
-use provider::{ReadProvider, File, FileType};
+use provider::{Provider, ProviderType, ReadProvider, File, FileType};
 
 pub struct Filesystem {
-    path: String,
 }
 
 impl Filesystem {
-    pub fn new(path: &str) -> Filesystem {
-        Filesystem{path: path.to_owned()}
+    pub fn new() -> Filesystem {
+        Filesystem{}
+    }
+}
+
+impl Provider for Filesystem {
+    fn name(&self) -> &'static str {
+        "filesystem"
+    }
+
+    fn type_(&self) -> ProviderType {
+        ProviderType::Local
     }
 }
 
 impl ReadProvider for Filesystem {
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
-        let entries = fs::read_dir(&self.path);
+        let entries = fs::read_dir(path);
 
         if let Err(ref err) = entries {
             if err.kind() == io::ErrorKind::NotFound {

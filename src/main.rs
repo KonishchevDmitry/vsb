@@ -36,10 +36,10 @@ use storage::Storage;
 fn main() {
     logging::init().expect("Failed to initialize the logging");
 
-    let local_storage = Storage::new_read_only(Filesystem::new("/Users/konishchev/.backup"));
+    let local_storage = Storage::new_read_only(Filesystem::new(), "/Users/konishchev/.backup");
 
     let mut cloud_storage = Storage::new(Dropbox::new(&env::var("DROPBOX_ACCESS_TOKEN")
-        .expect("DROPBOX_ACCESS_TOKEN environment variable is not set")).unwrap());
+        .expect("DROPBOX_ACCESS_TOKEN environment variable is not set")).unwrap(), "/Backups/macos.laptop");
 
-    sync::sync_backups(&local_storage, &mut cloud_storage);
+    sync::sync_backups(&local_storage, &mut cloud_storage).map_err(|e| error!("{}.", e)).unwrap();
 }

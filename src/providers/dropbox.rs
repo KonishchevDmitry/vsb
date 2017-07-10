@@ -11,7 +11,7 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
-use provider::{ReadProvider, WriteProvider, File, FileType};
+use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
@@ -48,6 +48,16 @@ impl Dropbox {
         headers.set_raw("Dropbox-API-Arg", request_json);
 
         return self.client.upload_request(&url, &headers, body);
+    }
+}
+
+impl Provider for Dropbox {
+    fn name(&self) -> &'static str {
+        "Dropbox"
+    }
+
+    fn type_(&self) -> ProviderType {
+        ProviderType::Cloud
     }
 }
 
