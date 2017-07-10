@@ -1,4 +1,4 @@
-use std::cmp::Ord;
+use std::collections::{BTreeMap, BTreeSet};
 
 use regex::{self, Regex};
 
@@ -29,11 +29,11 @@ impl Storage {
         self.provider.read().name()
     }
 
-    pub fn get_backup_groups(&self) -> GenericResult<Vec<BackupGroup>> {
+    pub fn get_backup_groups(&self) -> GenericResult<BackupGroups> {
         let backup_group_re = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$")?;
 
         let provider = self.provider.read();
-        let mut backup_groups = Vec::new();
+        let mut backup_groups = BackupGroups::new();
 
         let files = provider.list_directory(&self.path)?.ok_or_else(|| format!(
             "Backup root {:?} doesn't exist", self.path))?;
@@ -47,10 +47,8 @@ impl Storage {
 
             match file.type_ {
                 FileType::Directory if backup_group_re.is_match(&file.name) => {
-                    backup_groups.push(BackupGroup {
-                        name: file.name,
-                        backups: get_backups(provider, &group_path)?,
-                    });
+                    backup_groups.entry(file.name.clone()).or_insert_with(Backups::new).extend(
+                        get_backups(provider, &group_path)?.iter().cloned());
                 },
                 _ => {
                     error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
@@ -58,8 +56,6 @@ impl Storage {
                 },
             };
         }
-
-        backup_groups.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(backup_groups)
     }
@@ -98,15 +94,11 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
         backups.push(captures.unwrap().get(1).unwrap().as_str().to_owned());
     }
 
-    backups.sort();
-
     Ok(backups)
 }
 
-pub struct BackupGroup {
-    pub name: String,
-    pub backups: Vec<String>,
-}
+pub type BackupGroups = BTreeMap<String, Backups>;
+pub type Backups = BTreeSet<String>;
 
 // FIXME: Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we
 // have to emulate it via this trait.

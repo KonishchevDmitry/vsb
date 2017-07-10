@@ -1,11 +1,9 @@
-use std::collections::{BTreeMap, HashSet}; // FIXME: BTreeSet
-
 use log;
 use tar;
 
 use core::EmptyResult;
 use encryptor::Encryptor;
-use storage::{Storage, BackupGroup};
+use storage::{Storage, BackupGroups, Backups};
 
 // FIXME: + check logic
 pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> EmptyResult {
@@ -21,22 +19,19 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
             (cloud_storage, &cloud_backup_groups)
         ] {
             debug!("Backup groups on {}:", storage.provider_name());
-            for backup_group in backup_groups.iter() {
-                debug!("{}: {}", backup_group.name, backup_group.backups.join(", "));
+            for (group_name, backups) in backup_groups.iter() {
+                debug!("{}: {}", group_name, backups.iter().cloned().collect::<Vec<String>>().join(", "));
             }
         }
     }
 
-    let target_backup_groups = get_target_backup_groups(&[&local_backup_groups, &cloud_backup_groups], 1);
-    info!("> {:?}", target_backup_groups);
+    // FIXME: max
+    let target_backup_groups = get_target_backup_groups(local_backup_groups, &cloud_backup_groups, 1);
 
-    let mut cloud_backup_groups_map = BTreeMap::new();
-    map_backup_groups(&mut cloud_backup_groups_map, &cloud_backup_groups);
-
-    let no_backups = HashSet::new();
+    let no_backups = Backups::new();
 
     for (group_name, target_backup_names) in target_backup_groups.iter() {
-        let cloud_backup_names = match cloud_backup_groups_map.get(group_name) {
+        let cloud_backup_names = match cloud_backup_groups.get(group_name) {
             Some(backups) => backups,
             None => {
                 info!("Creating {} backup group on {}...", group_name, cloud_storage.provider_name());
@@ -52,7 +47,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
         }
     }
 
-    for (group_name, _) in cloud_backup_groups_map.iter() {
+    for (group_name, _) in cloud_backup_groups.iter() {
         if !target_backup_groups.contains_key(group_name) {
             info!("Deleting {} backup group from {}...", group_name, cloud_storage.provider_name());
         }
@@ -73,10 +68,13 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
 }
 
 // FIXME: check logic
-fn get_target_backup_groups(backup_groups_list: &[&Vec<BackupGroup>], max_backup_groups: usize) -> BTreeMap<String, HashSet<String>> {
-    let mut target_backup_groups = BTreeMap::new();
-    backup_groups_list.iter().map(|backup_groups|
-        map_backup_groups(&mut target_backup_groups, &backup_groups)).last();
+fn get_target_backup_groups(local_backup_groups: BackupGroups, cloud_backup_groups: &BackupGroups, max_backup_groups: usize) -> BackupGroups {
+    let mut target_backup_groups = local_backup_groups;
+
+    for (group_name, backups) in cloud_backup_groups.iter() {
+        target_backup_groups.entry(group_name.clone()).or_insert_with(Backups::new).extend(
+            backups.iter().cloned());
+    }
 
     if target_backup_groups.len() > max_backup_groups {
         let mut groups_num = 0;
@@ -101,15 +99,4 @@ fn get_target_backup_groups(backup_groups_list: &[&Vec<BackupGroup>], max_backup
     }
 
     target_backup_groups
-}
-
-fn map_backup_groups(backup_groups_map: &mut BTreeMap<String, HashSet<String>>, backup_groups: &Vec<BackupGroup>) {
-    for backup_group in backup_groups.iter() {
-        if !backup_groups_map.contains_key(&backup_group.name) {
-            backup_groups_map.insert(backup_group.name.clone(), HashSet::new());
-        }
-
-        backup_groups_map.get_mut(&backup_group.name).unwrap().extend(
-            backup_group.backups.iter().cloned());
-    }
 }
