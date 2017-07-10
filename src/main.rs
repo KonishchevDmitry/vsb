@@ -6,6 +6,7 @@ extern crate fern;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
+#[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 extern crate mime;
 extern crate nix;
@@ -34,6 +35,7 @@ mod util;
 
 use config::Config;
 use core::{EmptyResult, GenericResult};
+use logging::GlobalContext;
 use providers::dropbox::Dropbox;
 use providers::filesystem::Filesystem;
 use storage::Storage;
@@ -47,10 +49,14 @@ fn main() {
     let mut exit_code = 0;
 
     for backup in config.backups.iter() {
-        info!("Syncing {}...", backup.name);
-        if let Err(err) = handle_backup(backup) {
-            error!("Backup sync failed: {}.", err);
+        let _context = GlobalContext::new(&backup.name);
+
+        info!("Syncing...");
+        if let Err(err) = sync_backups(backup) {
+            error!("Sync failed: {}.", err);
             exit_code = 1;
+        } else {
+            info!("Sync completed.")
         }
     }
 
@@ -63,16 +69,13 @@ fn init() -> GenericResult<Config> {
     Ok(config)
 }
 
-// FIXME
-fn handle_backup(backup: &config::Backup) -> EmptyResult {
-    let local_storage = Storage::new_read_only(Filesystem::new(), &backup.src);
+fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
+    let local_storage = Storage::new_read_only(Filesystem::new(), &backup_config.src);
 
-    let mut cloud_storage = match backup.provider {
+    let mut cloud_storage = match backup_config.provider {
         config::Provider::Dropbox {ref access_token} => Storage::new(
-            Dropbox::new(&access_token)?, &backup.dst)
+            Dropbox::new(&access_token)?, &backup_config.dst)
     };
 
-    sync::sync_backups(&local_storage, &mut cloud_storage)?;
-
-    Ok(())
+    sync::sync_backups(&local_storage, &mut cloud_storage)
 }
