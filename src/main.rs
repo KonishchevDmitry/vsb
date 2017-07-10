@@ -1,6 +1,7 @@
 extern crate ansi_term;
 extern crate atty;
 extern crate chrono;
+extern crate clap;
 extern crate fern;
 extern crate futures;
 extern crate hyper;
@@ -13,11 +14,15 @@ extern crate regex;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
+extern crate shellexpand;
 extern crate tar;
 extern crate tokio_core;
 
 use std::env;
+use std::io::{self, Write};
+use std::process;
 
+mod config;
 #[macro_use] mod core;
 mod encryptor;
 mod http_client;
@@ -34,7 +39,13 @@ use storage::Storage;
 
 // FIXME
 fn main() {
+    config::load().unwrap_or_else(|e| {
+        writeln!(io::stderr(), "Error: {}.", e);
+        process::exit(1);
+    });
+
     logging::init().expect("Failed to initialize the logging");
+    return;
 
     let local_storage = Storage::new_read_only(Filesystem::new(), "/Users/konishchev/.backup");
 
