@@ -6,7 +6,6 @@ extern crate fern;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-#[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 extern crate mime;
 extern crate nix;
@@ -14,16 +13,16 @@ extern crate regex;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
+extern crate serde_yaml;
 extern crate shellexpand;
 extern crate tar;
 extern crate tokio_core;
 
-use std::env;
 use std::io::{self, Write};
 use std::process;
 
-mod config;
 #[macro_use] mod core;
+mod config;
 mod encryptor;
 mod http_client;
 mod logging;
@@ -33,24 +32,47 @@ mod storage;
 mod sync;
 mod util;
 
+use config::Config;
+use core::{EmptyResult, GenericResult};
 use providers::dropbox::Dropbox;
 use providers::filesystem::Filesystem;
 use storage::Storage;
 
-// FIXME
 fn main() {
-    config::load().unwrap_or_else(|e| {
-        writeln!(io::stderr(), "Error: {}.", e);
+    let config = init().unwrap_or_else(|e| {
+        let _ = writeln!(io::stderr(), "Error: {}.", e);
         process::exit(1);
     });
 
-    logging::init().expect("Failed to initialize the logging");
-    return;
+    let mut exit_code = 0;
 
-    let local_storage = Storage::new_read_only(Filesystem::new(), "/Users/konishchev/.backup");
+    for backup in config.backups.iter() {
+        info!("Syncing {}...", backup.name);
+        if let Err(err) = handle_backup(backup) {
+            error!("Backup sync failed: {}.", err);
+            exit_code = 1;
+        }
+    }
 
-    let mut cloud_storage = Storage::new(Dropbox::new(&env::var("DROPBOX_ACCESS_TOKEN")
-        .expect("DROPBOX_ACCESS_TOKEN environment variable is not set")).unwrap(), "/Backups/macos.laptop");
+    process::exit(exit_code);
+}
 
-    sync::sync_backups(&local_storage, &mut cloud_storage).map_err(|e| error!("{}.", e)).unwrap();
+fn init() -> GenericResult<Config> {
+    let config = config::load()?;
+    logging::init().map_err(|e| format!("Failed to initialize the logging: {}", e))?;
+    Ok(config)
+}
+
+// FIXME
+fn handle_backup(backup: &config::Backup) -> EmptyResult {
+    let local_storage = Storage::new_read_only(Filesystem::new(), &backup.src);
+
+    let mut cloud_storage = match backup.provider {
+        config::Provider::Dropbox {ref access_token} => Storage::new(
+            Dropbox::new(&access_token)?, &backup.dst)
+    };
+
+    sync::sync_backups(&local_storage, &mut cloud_storage)?;
+
+    Ok(())
 }

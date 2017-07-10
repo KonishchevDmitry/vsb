@@ -2,11 +2,6 @@ use std::fmt;
 
 use core::{GenericResult, EmptyResult};
 
-pub struct BackupFileOptions {
-    file_type: FileType,
-    extension: &'static str,
-}
-
 pub trait Provider {
     fn name(&self) -> &'static str;
     fn type_(&self) -> ProviderType;

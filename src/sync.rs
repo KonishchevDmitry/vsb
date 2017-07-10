@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap, BTreeMap};
+use std::collections::{HashSet, BTreeMap};
 
 use tar;
 
@@ -56,7 +56,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
         let mut archive = tar::Builder::new(encryptor);
         archive.append_dir_all("backup", "backup-mock").unwrap();
 
-        let mut encryptor = archive.into_inner().unwrap();
+        let encryptor = archive.into_inner().unwrap();
         encryptor.finish().map_err(|e| format!("Got an error: {}", e)).unwrap();
     }
 

@@ -30,9 +30,7 @@ impl Storage {
     }
 
     pub fn get_backup_groups(&self) -> GenericResult<Vec<BackupGroup>> {
-        lazy_static! {
-            static ref backup_group_re: Regex = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$").unwrap();
-        }
+        let backup_group_re = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$")?;
 
         let provider = self.provider.read();
         let mut backup_groups = Vec::new();

@@ -1,7 +1,7 @@
 use std::fs;
 use std::io;
 
-use core::{EmptyResult, GenericResult};
+use core::GenericResult;
 use provider::{Provider, ProviderType, ReadProvider, File, FileType};
 
 pub struct Filesystem {
