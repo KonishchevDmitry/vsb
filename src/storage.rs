@@ -103,7 +103,6 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
     Ok(backups)
 }
 
-#[derive(Debug)]
 pub struct BackupGroup {
     pub name: String,
     pub backups: Vec<String>,

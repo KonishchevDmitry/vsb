@@ -1,5 +1,6 @@
-use std::collections::{HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashSet}; // FIXME: BTreeSet
 
+use log;
 use tar;
 
 use core::EmptyResult;
@@ -14,8 +15,17 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
     let cloud_backup_groups = cloud_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", cloud_storage.provider_name(), e))?;
 
-    info!("> {:?}", local_backup_groups);
-    info!("> {:?}", cloud_backup_groups);
+    if log_enabled!(log::LogLevel::Debug) {
+        for &(storage, backup_groups) in &[
+            (local_storage, &local_backup_groups),
+            (cloud_storage, &cloud_backup_groups)
+        ] {
+            debug!("Backup groups on {}:", storage.provider_name());
+            for backup_group in backup_groups.iter() {
+                debug!("{}: {}", backup_group.name, backup_group.backups.join(", "));
+            }
+        }
+    }
 
     let target_backup_groups = get_target_backup_groups(&[&local_backup_groups, &cloud_backup_groups], 1);
     info!("> {:?}", target_backup_groups);
@@ -49,7 +59,6 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage) -> Emp
     }
 
     if false {
-        info!("> {:?}", local_storage.get_backup_groups().unwrap());
         let (encryptor, chunks) = Encryptor::new().unwrap();
         drop(chunks);
 

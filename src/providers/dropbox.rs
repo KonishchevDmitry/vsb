@@ -195,6 +195,7 @@ impl WriteProvider for Dropbox {
             close: true,
         }, rx)?;
 
+        // FIXME: Checksum
         let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,
