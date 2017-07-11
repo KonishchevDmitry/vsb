@@ -7,10 +7,10 @@ use storage::{Storage, BackupGroups, Backups};
 
 pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_backup_groups: usize) -> EmptyResult {
     let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
-        "Failed to list backup groups on {}: {}", local_storage.provider_name(), e))?;
+        "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
     let cloud_groups = cloud_storage.get_backup_groups().map_err(|e| format!(
-        "Failed to list backup groups on {}: {}", cloud_storage.provider_name(), e))?;
+        "Failed to list backup groups on {}: {}", cloud_storage.name(), e))?;
 
     if log_enabled!(log::LogLevel::Debug) {
         for &(storage, groups) in &[
@@ -18,9 +18,9 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_ba
             (cloud_storage, &cloud_groups)
         ] {
             if groups.is_empty() {
-                debug!("There are no backup groups on {}.", storage.provider_name());
+                debug!("There are no backup groups on {}.", storage.name());
             } else {
-                debug!("Backup groups on {}:", storage.provider_name());
+                debug!("Backup groups on {}:", storage.name());
                 for (group_name, backups) in groups.iter() {
                     debug!("{}: {}", group_name, backups.iter().cloned().collect::<Vec<String>>().join(", "));
                 }
@@ -39,12 +39,11 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_ba
         let cloud_backups = match cloud_groups.get(group_name) {
             Some(backups) => backups,
             None => {
-                info!("Creating {:?} backup group on {}...",
-                      group_name, cloud_storage.provider_name());
+                info!("Creating {:?} backup group on {}...", group_name, cloud_storage.name());
 
-                if let Err(err) = create_backup_group(cloud_storage, group_name) {
+                if let Err(err) = cloud_storage.create_backup_group(group_name) {
                     error!("Failed to create {:?} backup group on {}: {}.",
-                        group_name, cloud_storage.provider_name(), err);
+                           group_name, cloud_storage.name(), err);
                     continue;
                 }
 
@@ -58,11 +57,11 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_ba
             }
 
             let full_backup_name = group_name.to_owned() + "/" + backup_name;
-            info!("Uploading {:?} backup to {}...", full_backup_name, cloud_storage.provider_name());
+            info!("Uploading {:?} backup to {}...", full_backup_name, cloud_storage.name());
 
             if let Err(err) = upload_backup(local_storage, cloud_storage, group_name, backup_name) {
                 error!("Failed to upload {:?} backup to {}: {}.",
-                       full_backup_name, cloud_storage.provider_name(), err)
+                       full_backup_name, cloud_storage.name(), err)
             }
         }
     }
@@ -70,8 +69,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_ba
     for (group_name, _) in cloud_groups.iter() {
         if !target_groups.contains_key(group_name) {
             // FIXME
-            info!("Deleting {:?} backup group from {}...",
-                  group_name, cloud_storage.provider_name());
+            info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
         }
     }
 
@@ -109,11 +107,6 @@ fn get_target_backup_groups(local_groups: BackupGroups, cloud_groups: &BackupGro
     }
 
     target_groups
-}
-
-// FIXME
-fn create_backup_group(cloud_storage: &mut Storage, group_name: &str) -> EmptyResult {
-    Ok(())
 }
 
 // FIXME

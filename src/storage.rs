@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use regex::{self, Regex};
 
-use core::GenericResult;
+use core::{EmptyResult, GenericResult};
 use provider::{ProviderType, ReadProvider, WriteProvider, FileType};
 
 pub struct Storage {
@@ -25,7 +25,7 @@ impl Storage {
         }
     }
 
-    pub fn provider_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         self.provider.read().name()
     }
 
@@ -58,6 +58,15 @@ impl Storage {
         }
 
         Ok(backup_groups)
+    }
+
+    pub fn create_backup_group(&mut self, group_name: &str) -> EmptyResult {
+        let group_path = self.get_backup_group_path(group_name);
+        self.provider.write()?.create_directory(&group_path)
+    }
+
+    fn get_backup_group_path(&self, group_name: &str) -> String {
+        self.path.trim_right_matches('/').to_owned() + "/" + group_name
     }
 }
 
@@ -100,8 +109,8 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
 pub type BackupGroups = BTreeMap<String, Backups>;
 pub type Backups = BTreeSet<String>;
 
-// FIXME: Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we
-// have to emulate it via this trait.
+// Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
+// to emulate it via this trait.
 trait AbstractProvider {
     fn read(&self) -> &ReadProvider;
     fn write(&mut self) -> GenericResult<&WriteProvider>;

@@ -12,6 +12,7 @@ pub trait ReadProvider: Provider {
 }
 
 pub trait WriteProvider: Provider {
+    fn create_directory(&self, path: &str) -> EmptyResult;
     fn upload_file(&self, path: &str) -> EmptyResult;
 }
 

@@ -138,6 +138,19 @@ impl ReadProvider for Dropbox {
 }
 
 impl WriteProvider for Dropbox {
+    fn create_directory(&self, path: &str) -> EmptyResult {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            path: &'a str,
+        }
+
+        let _: EmptyResponse = self.api_request("/files/create_folder_v2", &Request {
+            path: path
+        })?;
+
+        Ok(())
+    }
+
     fn upload_file(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct StartRequest {
