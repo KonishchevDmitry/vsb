@@ -21,6 +21,7 @@ pub struct Backup {
     pub src: String,
     pub dst: String,
     pub provider: Provider,
+    pub max_backup_groups: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,6 +61,10 @@ fn load_config(path: &str) -> GenericResult<Config> {
         backup.name = validate_name(&backup.name)?;
         backup.src = validate_path(&shellexpand::tilde(&backup.src))?;
         backup.dst = validate_path(&backup.dst)?;
+
+        if backup.max_backup_groups == 0 {
+            return Err!("Maximum backup groups number must be positive")
+        }
     }
 
     Ok(config)

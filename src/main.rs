@@ -77,5 +77,5 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
             Dropbox::new(&access_token)?, &backup_config.dst)
     };
 
-    sync::sync_backups(&local_storage, &mut cloud_storage)
+    sync::sync_backups(&local_storage, &mut cloud_storage, backup_config.max_backup_groups)
 }
