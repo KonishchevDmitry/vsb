@@ -1,9 +1,7 @@
 use std::error::Error;
 use std::fmt;
-use std::thread;
 
-use futures::{Future, Sink};
-use hyper::{self, Body, Chunk};
+use hyper::Body;
 use hyper::header::{Authorization, Bearer, Headers};
 use serde::ser;
 use serde::de;
@@ -11,7 +9,7 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
-use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType, ChunkReceiver};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
@@ -151,7 +149,7 @@ impl WriteProvider for Dropbox {
         Ok(())
     }
 
-    fn upload_file(&self, path: &str) -> EmptyResult {
+    fn upload_file(&self, path: &str, data: ChunkReceiver) -> EmptyResult {
         #[derive(Serialize)]
         struct StartRequest {
         }
@@ -186,29 +184,18 @@ impl WriteProvider for Dropbox {
             mode: &'a str,
         }
 
-        // FIXME
-        use futures::sync::mpsc;
-        let (mut tx, rx) = mpsc::channel(2);
-
-        thread::spawn(|| {
-            let data: Result<Chunk, hyper::Error> = Ok(From::from("a"));
-            tx = tx.send(data).wait().unwrap();
-            let data: Result<Chunk, hyper::Error> = Ok(From::from("b"));
-            tx = tx.send(data).wait().unwrap();
-            drop(tx);
-        });
-
         let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{}, "")?;
 
+        // FIXME: Upload limits
         let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,
                 offset: 0,
             },
             close: true,
-        }, rx)?;
+        }, data)?;
 
-        // FIXME: Checksum
+        // FIXME: Verify checksum?
         let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,

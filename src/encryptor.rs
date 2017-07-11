@@ -7,10 +7,11 @@ use std::time;
 
 use futures::{Future, Sink};
 use futures::sync::mpsc;
-use hyper::{self, Chunk};
+use hyper;
 use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
+use provider::{ChunkReceiver, ChunkResult};
 use util;
 
 pub struct Encryptor {
@@ -18,12 +19,11 @@ pub struct Encryptor {
     stdin: Option<BufWriter<ChildStdin>>,
     stdout_reader: Option<JoinHandle<EmptyResult>>,
     encrypted_chunks_tx: Option<mpsc::Sender<ChunkResult>>,
+    result: Option<EmptyResult>,
 }
 
-type ChunkResult = Result<Chunk, hyper::Error>;
-
 impl Encryptor {
-    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, mpsc::Receiver<ChunkResult>)> {
+    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, ChunkReceiver)> {
         debug!("Spawning a gpg process to handle data encryption...");
 
         // Buffer is for the following reasons:
@@ -62,11 +62,12 @@ impl Encryptor {
             format!("Unable to spawn a thread: {}", e)
         })?;
 
-        let mut encryptor = Encryptor {
+        let encryptor = Encryptor {
             pid: pid,
             stdin: Some(stdin),
             stdout_reader: Some(stdout_reader),
             encrypted_chunks_tx: Some(encrypted_chunks_tx),
+            result: None,
         };
 
         if let Err(err) = passphrase_write_fd.write_all(encryption_passphrase.as_bytes())
@@ -79,55 +80,72 @@ impl Encryptor {
     }
 
     pub fn finish(mut self) -> EmptyResult {
-        self.close()
+        self.close(Ok(()))
     }
 
-    fn close(&mut self) -> EmptyResult {
-        let mut result: EmptyResult = Ok(());
+    fn close(&mut self, mut result: EmptyResult) -> EmptyResult {
+        if let None = self.result {
+            debug!("Closing encryptor with {:?}...", result);
 
-        if let Some(mut stdin) = self.stdin.take() {
-            if let Err(err) = stdin.flush() {
-                result = Err(From::from(err));
+            if let Some(mut stdin) = self.stdin.take() {
+                if let Err(err) = stdin.flush() {
+                    result = Err(err.into());
+                }
+
+                // Here stdin will be dropped and thus closed, so the gpg process will be expected to
+                // read the remaining data and finish its work as well as our stdout reading thread.
             }
 
-            // Here stdin will be dropped and thus closed, so the gpg process will be expected to
-            // read the remaining data and finish its work as well as our stdout reading thread.
-        }
-
-        if let Some(stdout_reader) = self.stdout_reader.take() {
-            if let Err(err) = util::join_thread(stdout_reader) {
-                result = Err(From::from(err));
-                terminate_gpg(self.pid);
+            if let Some(stdout_reader) = self.stdout_reader.take() {
+                if let Err(err) = util::join_thread(stdout_reader) {
+                    result = Err(err.into());
+                    terminate_gpg(self.pid);
+                }
             }
-        }
 
-        if let Some(encrypted_chunks_tx) = self.encrypted_chunks_tx.take() {
-            if let Err(ref err) = result {
-                let _ = encrypted_chunks_tx.send(Err(hyper::Error::Io(io::Error::new(
-                    io::ErrorKind::Other, err.to_string()))));
+            if let Some(encrypted_chunks_tx) = self.encrypted_chunks_tx.take() {
+                if let Err(ref err) = result {
+                    let _ = encrypted_chunks_tx.send(Err(
+                        io_error_from_string(err.to_string()).into()));
+                }
             }
+
+            debug!("Encryptor has closed with {:?}.", result);
+            self.result = Some(result);
         }
 
-        return result;
+        match *self.result.as_ref().unwrap() {
+            Ok(()) => Ok(()),
+            Err(ref err) => Err(err.to_string().into()),
+        }
     }
 }
 
 impl Drop for Encryptor {
     fn drop(&mut self) {
-        let _ = self.close();
+        let _ = self.close(Ok(()));
     }
 }
 
 impl io::Write for Encryptor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.stdin.as_mut().unwrap().write(buf).map(|size| {
-            trace!("Accepted {} bytes of data for encryption.", size);
-            size
+        if let Some(ref result) = self.result {
+            return Err(io_error_from_string(result.as_ref().unwrap_err().to_string()));
+        }
+
+        self.stdin.as_mut().unwrap().write(buf).map_err(|e| {
+            io_error_from_string(self.close(Err(e.into())).unwrap_err().to_string())
         })
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.stdin.as_mut().unwrap().flush()
+        if let Some(ref result) = self.result {
+            return Err(io_error_from_string(result.as_ref().unwrap_err().to_string()));
+        }
+
+        self.stdin.as_mut().unwrap().flush().map_err(|e| {
+            io_error_from_string(self.close(Err(e.into())).unwrap_err().to_string())
+        })
     }
 }
 
@@ -179,10 +197,13 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResul
                 break;
             }
 
-            trace!("Got {} bytes of encrypted data.", data.len());
             out.write_all(data)?;
 
-//            tx = tx.send(Ok(From::from(data.to_vec()))).wait()?;
+            // FIXME
+            tx = tx.send(Ok(data.to_vec().into())).wait().map_err(|e| {
+                error!("Receiver has closed connection");
+                format!("Connection is closed: {}", e)
+            })?;
 
             data.len()
         };
@@ -197,4 +218,8 @@ fn terminate_gpg(pid: i32) {
     if let Err(err) = util::terminate_process("a child gpg process", pid, termination_timeout) {
         error!("{}.", err)
     }
+}
+
+fn io_error_from_string(error: String) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, error)
 }

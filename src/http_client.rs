@@ -17,8 +17,6 @@ use tokio_core::reactor::Core;
 
 // FIXME: timeouts
 pub struct HttpClient {
-    core: RefCell<Core>,
-    client: Client<HttpsConnector<HttpConnector>>,
     default_headers: Headers,
 }
 
@@ -27,12 +25,7 @@ impl HttpClient {
         let mut default_headers = Headers::new();
         default_headers.set(UserAgent::new("pyvsb-to-cloud"));
 
-        let core = Core::new()?;
-        let handle = core.handle();
-
         Ok(HttpClient {
-            core: RefCell::new(core),
-            client: Client::configure().connector(HttpsConnector::new(1, &handle)?).build(&handle),
             default_headers: default_headers,
         })
     }
@@ -64,7 +57,14 @@ impl HttpClient {
               E: de::DeserializeOwned + Error,
     {
         let method = Method::Post;
-        trace!("Sending {method} {url} {headers}...", method=method, url=url, headers=headers);
+
+        if headers.len() == 0 {
+            trace!("Sending {method} {url}...", method=method, url=url);
+        } else {
+            trace!("Sending {method} {url}:\n{headers}", method=method, url=url,
+                   headers=headers.iter().map(|header| header.to_string().trim_right_matches("\r\n").to_owned())
+                       .collect::<Vec<_>>().join("\n"));
+        }
 
         let mut request_headers = self.default_headers.clone();
         request_headers.set(ContentType::octet_stream());
@@ -84,9 +84,18 @@ impl HttpClient {
         *http_request.headers_mut() = headers;
         http_request.set_body(body);
 
-        let mut core = self.core.borrow_mut();
+        // Attention:
+        // We create a new event loop per each request because hyper has a bug due to which in case
+        // when server responds before we complete sending our request (for example with 413 Payload
+        // Too Large status code), request body gets leaked probably somewhere in connection pool,
+        // so body's mpsc::Receiver doesn't gets closed and sender hangs on it forever.
+        let mut core = Core::new().map_err(HttpClientError::generic_from)?;
+        let handle = core.handle();
+        let https_connector = HttpsConnector::new(1, &handle)
+            .map_err(HttpClientError::generic_from)?;
+        let client =  Client::configure().connector(https_connector).build(&handle);
 
-        let response: Response = core.run(self.client.request(http_request))
+        let response: Response = core.run(client.request(http_request))
             .map_err(HttpClientError::generic_from)?;
 
         // Response::body() borrows Response, so we have to store all fields that we need later
@@ -94,7 +103,6 @@ impl HttpClient {
         let content_type = response.headers().get::<ContentType>().map(
             |header_ref| header_ref.clone());
 
-        // FIXME: Use sync methods (send())
         // FIXME: Limit size
         let body: Chunk = core.run(response.body().concat2())
             .map_err(HttpClientError::generic_from)?;

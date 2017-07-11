@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::thread;
 
 use regex::{self, Regex};
+use tar;
 
 use core::{EmptyResult, GenericResult};
+use encryptor::Encryptor;
 use provider::{ProviderType, ReadProvider, WriteProvider, FileType};
+use util;
 
 pub struct Storage {
     provider: Box<AbstractProvider>,
@@ -65,19 +69,56 @@ impl Storage {
         self.provider.write()?.create_directory(&group_path)
     }
 
-    fn get_backup_group_path(&self, group_name: &str) -> String {
+    pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
+                         encryption_passphrase: &str) -> EmptyResult {
+        let (encryptor, chunks) = Encryptor::new(encryption_passphrase)?;
+
+        let backup_name = backup_name.to_owned();
+        let local_backup_path = local_backup_path.to_owned();
+        let cloud_backup_path = self.get_backup_path(group_name, &backup_name);
+
+        let archive_thread = thread::Builder::new().name("backup archiving thread".into()).spawn(move || {
+            archive_backup(&backup_name, &local_backup_path, encryptor)
+        }).map_err(|e| {
+            format!("Unable to spawn a thread: {}", e)
+        })?;
+
+        let upload_result = self.provider.write().and_then(move |provider| {
+            drop(chunks);
+            Ok(())
+//            provider.upload_file(&cloud_backup_path, chunks)
+        });
+
+        let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
+            "Archive operation has failed: {}", e));
+
+        upload_result?;
+        archive_result?;
+
+        Ok(())
+    }
+
+    pub fn get_backup_group_path(&self, group_name: &str) -> String {
         self.path.trim_right_matches('/').to_owned() + "/" + group_name
+    }
+
+    pub fn get_backup_path(&self, group_name: &str, backup_name: &str) -> String {
+        let backup_file_extension = match self.provider.read().type_() {
+            ProviderType::Local => "",
+            ProviderType::Cloud => CLOUD_BACKUP_FILE_EXTENSION,
+        };
+        self.get_backup_group_path(group_name) + "/" + backup_name + backup_file_extension
     }
 }
 
-const CLOUD_BACKUP_EXTENSION: &str = ".tar.gpg";
+const CLOUD_BACKUP_FILE_EXTENSION: &str = ".tar.gpg";
 
 fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<String>> {
     let mut backups = Vec::new();
 
     let (backup_file_type, backup_file_extension) = match provider.type_() {
         ProviderType::Local => (FileType::Directory, ""),
-        ProviderType::Cloud => (FileType::File, CLOUD_BACKUP_EXTENSION),
+        ProviderType::Cloud => (FileType::File, CLOUD_BACKUP_FILE_EXTENSION),
     };
 
     let backup_file_re: Regex = Regex::new(&(
@@ -104,6 +145,16 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
     }
 
     Ok(backups)
+}
+
+fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) -> EmptyResult {
+    let mut archive = tar::Builder::new(encryptor);
+    archive.append_dir_all(backup_name, backup_path)?;
+
+    let encryptor = archive.into_inner()?;
+    encryptor.finish()?;
+
+    Ok(())
 }
 
 pub type BackupGroups = BTreeMap<String, Backups>;

@@ -1,5 +1,8 @@
 use std::fmt;
 
+use futures::sync::mpsc;
+use hyper::{self, Chunk};
+
 use core::{GenericResult, EmptyResult};
 
 pub trait Provider {
@@ -13,7 +16,7 @@ pub trait ReadProvider: Provider {
 
 pub trait WriteProvider: Provider {
     fn create_directory(&self, path: &str) -> EmptyResult;
-    fn upload_file(&self, path: &str) -> EmptyResult;
+    fn upload_file(&self, path: &str, data: ChunkReceiver) -> EmptyResult;
 }
 
 pub enum ProviderType {
@@ -42,3 +45,6 @@ impl fmt::Display for FileType {
         })
     }
 }
+
+pub type ChunkReceiver = mpsc::Receiver<ChunkResult>;
+pub type ChunkResult = Result<Chunk, hyper::Error>;
