@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, BufReader, BufRead, Write, BufWriter};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
 use std::thread::{self, JoinHandle};
 use std::time;
@@ -7,6 +8,7 @@ use std::time;
 use futures::{Future, Sink};
 use futures::sync::mpsc;
 use hyper::{self, Chunk};
+use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
 use util;
@@ -21,17 +23,33 @@ pub struct Encryptor {
 type ChunkResult = Result<Chunk, hyper::Error>;
 
 impl Encryptor {
-    pub fn new() -> GenericResult<(Encryptor, mpsc::Receiver<ChunkResult>)> {
+    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, mpsc::Receiver<ChunkResult>)> {
         debug!("Spawning a gpg process to handle data encryption...");
 
-        // One buffer slot is for parallelization or to not block in drop() if we get some error
-        // during dropping the object that hasn't been used yet (hasn't been written to).
-        let (tx, rx) = mpsc::channel(1);
+        // Buffer is for the following reasons:
+        // 1. Parallelization on successful result.
+        // 2. To not block in drop() if we get some error during dropping the object that hasn't
+        //    been used yet (hasn't been written to):
+        //    * One buffer slot for gpg overhead around an empty payload.
+        //    * One buffer slot for our error message.
+        let (tx, rx) = mpsc::channel(2);
 
-        // FIXME
-        let mut gpg = Command::new("cat")//.arg("a")
+        let (passphrase_read_fd, passphrase_write_fd) = unistd::pipe2(fcntl::O_CLOEXEC)
+            .map_err(|e| format!("Unable to create a pipe: {}", e))?;
+
+        let (passphrase_read_fd, mut passphrase_write_fd) = unsafe {
+            (File::from_raw_fd(passphrase_read_fd), File::from_raw_fd(passphrase_write_fd))
+        };
+
+        fcntl::fcntl(passphrase_read_fd.as_raw_fd(),
+                     fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
+
+        let mut gpg = Command::new("gpg")
+            .arg("--batch").arg("--symmetric")
+            .arg("--passphrase-fd").arg(passphrase_read_fd.as_raw_fd().to_string())
+            .arg("--compress-algo").arg("none")
             .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-            .spawn()?;
+            .spawn().map_err(|e| format!("Unable to spawn a gpg process: {}", e))?;
 
         let pid = gpg.id() as i32;
         let stdin = BufWriter::new(gpg.stdin.take().unwrap());
@@ -44,12 +62,20 @@ impl Encryptor {
             format!("Unable to spawn a thread: {}", e)
         })?;
 
-        Ok((Encryptor {
+        let mut encryptor = Encryptor {
             pid: pid,
             stdin: Some(stdin),
             stdout_reader: Some(stdout_reader),
             encrypted_chunks_tx: Some(encrypted_chunks_tx),
-        }, rx))
+        };
+
+        if let Err(err) = passphrase_write_fd.write_all(encryption_passphrase.as_bytes())
+            .and_then(|_| passphrase_write_fd.flush()) {
+            encryptor.finish()?;
+            return Err!("Failed to pass encryption passphrase to gpg: {}", err);
+        }
+
+        Ok((encryptor, rx))
     }
 
     pub fn finish(mut self) -> EmptyResult {
@@ -144,7 +170,7 @@ fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
 
 fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
     // FIXME
-    let mut out = File::create("backup-mock.tar").unwrap();
+    let mut out = File::create("backup-mock.tar.gpg").unwrap();
 
     loop {
         let size = {
@@ -156,7 +182,7 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResul
             trace!("Got {} bytes of encrypted data.", data.len());
             out.write_all(data)?;
 
-            tx = tx.send(Ok(From::from(data.to_vec()))).wait()?;
+//            tx = tx.send(Ok(From::from(data.to_vec()))).wait()?;
 
             data.len()
         };

@@ -42,7 +42,7 @@ use storage::Storage;
 
 fn main() {
     let config = init().unwrap_or_else(|e| {
-        let _ = writeln!(io::stderr(), "Error: {}.", e);
+        let _ = writeln!(io::stderr(), "{}.", e);
         process::exit(1);
     });
 
@@ -77,5 +77,6 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
             Dropbox::new(&access_token)?, &backup_config.dst)
     };
 
-    sync::sync_backups(&local_storage, &mut cloud_storage, backup_config.max_backup_groups)
+    sync::sync_backups(&local_storage, &mut cloud_storage,
+                       backup_config.max_backup_groups, &backup_config.encryption_passphrase)
 }

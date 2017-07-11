@@ -5,7 +5,8 @@ use core::EmptyResult;
 use encryptor::Encryptor;
 use storage::{Storage, BackupGroups, Backups};
 
-pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_backup_groups: usize) -> EmptyResult {
+pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
+                    max_backup_groups: usize, encryption_passphrase: &str) -> EmptyResult {
     let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
@@ -59,7 +60,8 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage, max_ba
             let full_backup_name = group_name.to_owned() + "/" + backup_name;
             info!("Uploading {:?} backup to {}...", full_backup_name, cloud_storage.name());
 
-            if let Err(err) = upload_backup(local_storage, cloud_storage, group_name, backup_name) {
+            if let Err(err) = upload_backup(local_storage, cloud_storage, group_name, backup_name,
+                                            encryption_passphrase) {
                 error!("Failed to upload {:?} backup to {}: {}.",
                        full_backup_name, cloud_storage.name(), err)
             }
@@ -110,17 +112,16 @@ fn get_target_backup_groups(local_groups: BackupGroups, cloud_groups: &BackupGro
 }
 
 // FIXME
-fn upload_backup(local_storage: &Storage, cloud_storage: &mut Storage, group_name: &str, backup_name: &str) -> EmptyResult {
-    if false {
-        let (encryptor, chunks) = Encryptor::new().unwrap();
-        drop(chunks);
+fn upload_backup(local_storage: &Storage, cloud_storage: &mut Storage,
+                 group_name: &str, backup_name: &str, encryption_passphrase: &str) -> EmptyResult {
+    let (encryptor, chunks) = Encryptor::new(encryption_passphrase)?;
+//    drop(chunks);
 
-        let mut archive = tar::Builder::new(encryptor);
-        archive.append_dir_all("backup", "backup-mock").unwrap();
+    let mut archive = tar::Builder::new(encryptor);
+    archive.append_dir_all("backup", "backup-mock")?;
 
-        let encryptor = archive.into_inner().unwrap();
-        encryptor.finish().map_err(|e| format!("Got an error: {}", e)).unwrap();
-    }
+    let encryptor = archive.into_inner().unwrap();
+    encryptor.finish().map_err(|e| format!("Got an error: {}", e))?;
 
     Ok(())
 }

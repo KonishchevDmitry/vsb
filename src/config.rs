@@ -22,6 +22,7 @@ pub struct Backup {
     pub dst: String,
     pub provider: Provider,
     pub max_backup_groups: usize,
+    pub encryption_passphrase: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -49,7 +50,7 @@ pub fn load() -> GenericResult<Config> {
         shellexpand::tilde(default_config_path).to_string());
 
     Ok(load_config(&config_path).map_err(|e| format!(
-        "Failed to read {:?} configuration file: {}", config_path, e))?)
+        "Error while reading {:?} configuration file: {}", config_path, e))?)
 }
 
 fn load_config(path: &str) -> GenericResult<Config> {
@@ -63,7 +64,11 @@ fn load_config(path: &str) -> GenericResult<Config> {
         backup.dst = validate_path(&backup.dst)?;
 
         if backup.max_backup_groups == 0 {
-            return Err!("Maximum backup groups number must be positive")
+            return Err!("Maximum backup groups number must be positive");
+        }
+
+        if backup.encryption_passphrase.len() == 0 {
+            return Err!("Encryption passphrase mustn't be empty");
         }
     }
 
