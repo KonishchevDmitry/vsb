@@ -16,7 +16,8 @@ pub trait ReadProvider: Provider {
 pub trait WriteProvider: Provider {
     fn hasher(&self) -> Box<Hasher>;
     fn create_directory(&self, path: &str) -> EmptyResult;
-    fn upload_file(&self, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult;
+    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult;
+    fn delete(&self, path: &str) -> EmptyResult;
 }
 
 pub enum ProviderType {

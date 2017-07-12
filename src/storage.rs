@@ -77,7 +77,8 @@ impl Storage {
 
         let backup_name = backup_name.to_owned();
         let local_backup_path = local_backup_path.to_owned();
-        let cloud_backup_path = self.get_backup_path(group_name, &backup_name);
+        let cloud_backup_temp_path = self.get_backup_path(group_name, &backup_name, true);
+        let cloud_backup_path = self.get_backup_path(group_name, &backup_name, false);
 
         // FIXME: Stream size
         let (chunk_streams, splitter_thread) = stream_splitter::split(
@@ -93,7 +94,9 @@ impl Storage {
             },
         };
 
-        let upload_result = provider.upload_file(&cloud_backup_path, chunk_streams);
+        let upload_result = provider.upload_file(
+            &cloud_backup_temp_path, &cloud_backup_path, chunk_streams);
+
         let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
             "Archive operation has failed: {}", e));
 
@@ -110,16 +113,26 @@ impl Storage {
         Ok(())
     }
 
+    pub fn delete_backup_group(&mut self, group_name: &str) -> EmptyResult {
+        let group_path = self.get_backup_group_path(group_name);
+        self.provider.write()?.delete(&group_path)
+    }
+
     pub fn get_backup_group_path(&self, group_name: &str) -> String {
         self.path.trim_right_matches('/').to_owned() + "/" + group_name
     }
 
-    pub fn get_backup_path(&self, group_name: &str, backup_name: &str) -> String {
+    pub fn get_backup_path(&self, group_name: &str, backup_name: &str, temporary: bool) -> String {
         let backup_file_extension = match self.provider.read().type_() {
             ProviderType::Local => "",
             ProviderType::Cloud => CLOUD_BACKUP_FILE_EXTENSION,
         };
-        self.get_backup_group_path(group_name) + "/" + backup_name + backup_file_extension
+
+        let mut path = self.get_backup_group_path(group_name) + "/";
+        if temporary {
+            path += ".";
+        }
+        path + backup_name + backup_file_extension
     }
 }
 

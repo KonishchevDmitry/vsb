@@ -62,7 +62,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                 continue;
             }
 
-            let backup_path = local_storage.get_backup_path(group_name, backup_name);
+            let backup_path = local_storage.get_backup_path(group_name, backup_name, false);
             info!("Uploading {:?} backup to {}...", backup_path, cloud_storage.name());
 
             if let Err(err) = cloud_storage.upload_backup(
@@ -70,16 +70,17 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                 error!("Failed to upload {:?} backup to {}: {}.",
                        backup_path, cloud_storage.name(), err)
             }
-
-            // FIXME
-            panic!("Done!");
         }
     }
 
     for (group_name, _) in cloud_groups.iter() {
-        if !target_groups.contains_key(group_name) {
-            // FIXME
+        // FIXME
+        if true || !target_groups.contains_key(group_name) {
             info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
+            if let Err(err) = cloud_storage.delete_backup_group(group_name) {
+                error!("Failed to delete {:?} backup backup group from {}: {}.",
+                       group_name, cloud_storage.name(), err)
+            }
         }
     }
 

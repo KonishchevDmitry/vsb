@@ -28,6 +28,21 @@ impl Dropbox {
         })
     }
 
+    fn rename_file(&self, src: &str, dst: &str) -> EmptyResult {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            from_path: &'a str,
+            to_path: &'a str,
+        }
+
+        let _: EmptyResponse = self.api_request("/files/move_v2", &Request {
+            from_path: src,
+            to_path: dst,
+        })?;
+
+        Ok(())
+    }
+
     fn api_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<ApiError>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
@@ -155,7 +170,7 @@ impl WriteProvider for Dropbox {
         Ok(())
     }
 
-    fn upload_file(&self, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
         #[derive(Serialize)]
         struct StartRequest {
         }
@@ -176,6 +191,11 @@ impl WriteProvider for Dropbox {
             commit: Commit<'a>,
         }
 
+        #[derive(Debug, Deserialize)]
+        struct FinishResponse {
+            content_hash: String,
+        }
+
         #[derive(Serialize)]
         struct Cursor<'a> {
             session_id: &'a str,
@@ -188,36 +208,42 @@ impl WriteProvider for Dropbox {
             mode: &'a str,
         }
 
-        let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{}, "")?;
+        let start_response: StartResponse = self.content_request(
+            "/files/upload_session/start", &StartRequest{}, "")?;
 
         for result in chunk_streams.iter() {
             match result {
                 Ok(ChunkStream::Stream(offset, chunk_stream)) => {
-                    let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
-                        cursor: Cursor {
-                            session_id: &start_response.session_id,
-                            offset: offset,
-                        },
-                    }, chunk_stream)?;
+                    let _: Option<EmptyResponse> = self.content_request(
+                        "/files/upload_session/append_v2", &AppendRequest{
+                            cursor: Cursor {
+                                session_id: &start_response.session_id,
+                                offset: offset,
+                            },
+                        }, chunk_stream)?;
                 },
                 Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
-                    // FIXME: We need some EOF markers
-                    error!("Checksum {}", checksum);
+                    let finish_response: FinishResponse = self.content_request(
+                        "/files/upload_session/finish", &FinishRequest{
+                            cursor: Cursor {
+                                session_id: &start_response.session_id,
+                                offset: size,
+                            },
+                            commit: Commit {
+                                path: temp_path,
+                                mode: "overwrite",
+                            },
+                        }, "")?;
 
-                    // FIXME: Verify checksum?
-                    let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
-                        cursor: Cursor {
-                            session_id: &start_response.session_id,
-                            // FIXME: invalid offset
-                            offset: size,
-                        },
-                        commit: Commit {
-                            path: path,
-                            mode: "overwrite",
-                        },
-                    }, "")?;
+                    if finish_response.content_hash != checksum {
+                        if let Err(err) = self.delete(temp_path) {
+                            warn!("Failed to delete a temporary {:?} file from {}: {}.",
+                                temp_path, self.name(), err);
+                        }
+                        return Err("Checksum mismatch".into());
+                    }
 
-                    return Ok(());
+                    return self.rename_file(temp_path, path);
                 }
                 Err(err) => {
                     return Err(err.into());
@@ -225,8 +251,20 @@ impl WriteProvider for Dropbox {
             }
         }
 
-        // FIXME
-        panic!("Logical error");
+        Err!("A logical error has occurred")
+    }
+
+    fn delete(&self, path: &str) -> EmptyResult {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            path: &'a str,
+        }
+
+        let _: EmptyResponse = self.api_request("/files/delete_v2", &Request {
+            path: path
+        })?;
+
+        Ok(())
     }
 }
 
