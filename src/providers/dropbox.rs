@@ -219,6 +219,9 @@ impl WriteProvider for Dropbox {
 
                     return Ok(());
                 }
+                ChunkStream::Error(err) => {
+                    return Err(err.into());
+                },
             }
         }
 

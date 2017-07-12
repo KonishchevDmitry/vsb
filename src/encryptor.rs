@@ -16,7 +16,7 @@ use util;
 pub struct Encryptor {
     pid: i32,
     stdin: Option<BufWriter<ChildStdin>>,
-    stdout_reader: Option<JoinHandle<EmptyResult>>,
+    stdout_reader: Option<JoinHandle<GenericResult<String>>>,
     encrypted_data_tx: Option<DataSender>,
     result: Option<EmptyResult>,
 }
@@ -71,17 +71,18 @@ impl Encryptor {
 
         if let Err(err) = passphrase_write_fd.write_all(encryption_passphrase.as_bytes())
             .and_then(|_| passphrase_write_fd.flush()) {
-            encryptor.finish()?;
+            encryptor.finish(None)?; // Try to get the real error here
             return Err!("Failed to pass encryption passphrase to gpg: {}", err);
         }
 
         Ok((encryptor, rx))
     }
 
-    pub fn finish(mut self) -> EmptyResult {
-        self.close(Ok(()))
+    pub fn finish(mut self, error: Option<String>) -> EmptyResult {
+        self.close(error.map_or(Ok(()), |e| Err(e.into())))
     }
 
+    // FIXME: check
     fn close(&mut self, mut result: EmptyResult) -> EmptyResult {
         if let None = self.result {
             debug!("Closing encryptor with {:?}...", result);
@@ -96,17 +97,23 @@ impl Encryptor {
             }
 
             if let Some(stdout_reader) = self.stdout_reader.take() {
-                if let Err(err) = util::join_thread(stdout_reader) {
-                    result = Err(err.into());
-                    terminate_gpg(self.pid);
-                }
-            }
+                let tx = self.encrypted_data_tx.take().unwrap();
 
-            if let Some(encrypted_chunks_tx) = self.encrypted_data_tx.take() {
-                if let Err(ref err) = result {
-                    let _ = encrypted_chunks_tx.send(Err(
-                        io_error_from_string(err.to_string()).into()));
-                }
+                let message = match util::join_thread(stdout_reader) {
+                    Ok(checksum) => {
+                        match result {
+                            Ok(_) => Ok(Data::EofWithChecksum(checksum)),
+                            Err(ref err) => Err(err.to_string().into()),
+                        }
+                    },
+                    Err(err) => {
+                        result = Err(err.to_string().into());
+                        terminate_gpg(self.pid);
+                        Err(err.into())
+                    },
+                };
+
+                let _ = tx.send(message);
             }
 
             debug!("Encryptor has closed with {:?}.", result);
@@ -122,7 +129,7 @@ impl Encryptor {
 
 impl Drop for Encryptor {
     fn drop(&mut self) {
-        let _ = self.close(Ok(()));
+        let _ = self.close(Err!("The encryptor has dropped without finalization"));
     }
 }
 
@@ -148,7 +155,7 @@ impl io::Write for Encryptor {
     }
 }
 
-fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> EmptyResult {
+fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
     let mut stderr = gpg.stderr.take().unwrap();
     let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
@@ -167,7 +174,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> EmptyRe
 
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
 
-    read_data(stdout, hasher, tx).map_err(|err| {
+    let checksum = read_data(stdout, hasher, tx).map_err(|err| {
         terminate_gpg(gpg.id() as i32);
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
@@ -184,20 +191,17 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> EmptyRe
         return Err!("gpg process has terminated with an error exit code")
     }
 
-    Ok(())
+    Ok(checksum)
 }
 
-fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: DataSender) -> EmptyResult {
+fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
     loop {
         let size = {
             let encrypted_data = stdout.fill_buf().map_err(|e| format!(
                 "gpg stdout reading error: {}", e))?;
 
             if encrypted_data.is_empty() {
-                let checksum = hasher.finish();
-                tx.send(Ok(Data::EofWithChecksum(checksum))).map_err(|_|
-                    "Unable to send encrypted data: the receiver has been closed".to_owned())?;
-                break;
+                return Ok(hasher.finish());
             }
 
             hasher.write_all(encrypted_data).unwrap();
@@ -209,8 +213,6 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: Da
 
         stdout.consume(size);
     }
-
-    Ok(())
 }
 
 fn terminate_gpg(pid: i32) {

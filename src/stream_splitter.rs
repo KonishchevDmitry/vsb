@@ -25,6 +25,7 @@ pub type DataReceiver = mpsc::Receiver<GenericResult<Data>>;
 pub enum ChunkStream {
     Stream(u64, ChunkReceiver),
     EofWithCheckSum(u64, String),
+    Error(String),
 }
 
 pub type ChunkStreamSender = mpsc::SyncSender<ChunkStream>;
@@ -66,12 +67,18 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
                 return Ok(());
             },
             Err(err) => {
-                let err = io::Error::new(io::ErrorKind::Other, err.to_string()).into();
-                tx.send(Err(err)).wait()?;
+                // FIXME: https://github.com/tokio-rs/tokio-proto/blob/42ddd45cd34fde8ddd12bdf49a8147762787bf33/src/streaming/pipeline/advanced.rs#L329
+                // FIXME
+                drop(tx);
+                chunk_streams.send(ChunkStream::Error(err.to_string()))?;
+
+                // FIXME
+//                let err = io::Error::new(io::ErrorKind::Other, err.to_string()).into();
+//                tx.send(Err(err)).wait()?;
 
                 // Ensure that this error result is the last in the stream and we aren't skipping
                 // any data.
-                data_stream.recv().unwrap_err();
+//                data_stream.recv().unwrap_err();
 
                 return Ok(());
             }
