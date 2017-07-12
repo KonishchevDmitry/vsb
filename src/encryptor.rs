@@ -82,48 +82,46 @@ impl Encryptor {
         self.close(error.map_or(Ok(()), |e| Err(e.into())))
     }
 
-    // FIXME: check
     fn close(&mut self, mut result: EmptyResult) -> EmptyResult {
-        if let None = self.result {
-            debug!("Closing encryptor with {:?}...", result);
-
-            if let Some(mut stdin) = self.stdin.take() {
-                if let Err(err) = stdin.flush() {
-                    result = Err(err.into());
-                }
-
-                // Here stdin will be dropped and thus closed, so the gpg process will be expected to
-                // read the remaining data and finish its work as well as our stdout reading thread.
-            }
-
-            if let Some(stdout_reader) = self.stdout_reader.take() {
-                let tx = self.encrypted_data_tx.take().unwrap();
-
-                let message = match util::join_thread(stdout_reader) {
-                    Ok(checksum) => {
-                        match result {
-                            Ok(_) => Ok(Data::EofWithChecksum(checksum)),
-                            Err(ref err) => Err(err.to_string().into()),
-                        }
-                    },
-                    Err(err) => {
-                        result = Err(err.to_string().into());
-                        terminate_gpg(self.pid);
-                        Err(err.into())
-                    },
-                };
-
-                let _ = tx.send(message);
-            }
-
-            debug!("Encryptor has closed with {:?}.", result);
-            self.result = Some(result);
+        if let Some(ref result) = self.result {
+            return clone_empty_result(result);
         }
 
-        match *self.result.as_ref().unwrap() {
-            Ok(()) => Ok(()),
-            Err(ref err) => Err(err.to_string().into()),
+        debug!("Closing encryptor with {:?}...", result);
+
+        if let Some(mut stdin) = self.stdin.take() {
+            if let Err(err) = stdin.flush() {
+                result = Err(err.into());
+            }
+
+            // Here stdin will be dropped and thus closed, so the gpg process will be expected to
+            // read the remaining data and finish its work as well as our stdout reading thread.
         }
+
+        if let Some(stdout_reader) = self.stdout_reader.take() {
+            let tx = self.encrypted_data_tx.take().unwrap();
+
+            let message = match util::join_thread(stdout_reader) {
+                Ok(checksum) => {
+                    match result {
+                        Ok(_) => Ok(Data::EofWithChecksum(checksum)),
+                        Err(ref err) => Err(err.to_string()),
+                    }
+                },
+                Err(err) => {
+                    result = Err(err.to_string().into());
+                    terminate_gpg(self.pid);
+                    Err(err.to_string())
+                },
+            };
+
+            let _ = tx.send(message);
+        }
+
+        debug!("Encryptor has closed with {:?}.", result);
+        self.result = Some(clone_empty_result(&result));
+
+        result
     }
 }
 
@@ -156,7 +154,9 @@ impl io::Write for Encryptor {
 }
 
 fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
+    let stdout = BufReader::new(gpg.stdout.take().unwrap());
     let mut stderr = gpg.stderr.take().unwrap();
+
     let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
 
@@ -172,24 +172,20 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
         }
     }).map_err(|err| format!("Unable to spawn a thread: {}", err))?);
 
-    let stdout = BufReader::new(gpg.stdout.take().unwrap());
-
     let checksum = read_data(stdout, hasher, tx).map_err(|err| {
         terminate_gpg(gpg.id() as i32);
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
     })?;
 
-    // FIXME
     util::join_thread(stderr_reader.take().unwrap())?;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
-    // FIXME: checksum here
-    if status.success() {
-        debug!("gpg process has terminated with successful exit code.")
-    } else {
-        return Err!("gpg process has terminated with an error exit code")
+    if !status.success() {
+        return Err!("gpg process has terminated with an error exit code");
     }
+
+    debug!("gpg process has terminated with successful exit code.");
 
     Ok(checksum)
 }
@@ -224,4 +220,11 @@ fn terminate_gpg(pid: i32) {
 
 fn io_error_from_string(error: String) -> io::Error {
     io::Error::new(io::ErrorKind::Other, error)
+}
+
+fn clone_empty_result(result: &EmptyResult) -> EmptyResult {
+    match *result {
+        Ok(()) => Ok(()),
+        Err(ref err) => Err(err.to_string().into()),
+    }
 }

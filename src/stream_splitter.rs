@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::fmt;
-use std::io;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
@@ -11,25 +10,21 @@ use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
 
-// FIXME: naming
-#[derive(Debug)]
 pub enum Data {
     Payload(Bytes),
     EofWithChecksum(String),
 }
 
-pub type DataSender = mpsc::SyncSender<GenericResult<Data>>;
-pub type DataReceiver = mpsc::Receiver<GenericResult<Data>>;
+pub type DataSender = mpsc::SyncSender<Result<Data, String>>;
+pub type DataReceiver = mpsc::Receiver<Result<Data, String>>;
 
-// FIXME: naming
 pub enum ChunkStream {
     Stream(u64, ChunkReceiver),
     EofWithCheckSum(u64, String),
-    Error(String),
 }
 
-pub type ChunkStreamSender = mpsc::SyncSender<ChunkStream>;
-pub type ChunkStreamReceiver = mpsc::Receiver<ChunkStream>;
+pub type ChunkStreamSender = mpsc::SyncSender<Result<ChunkStream, String>>;
+pub type ChunkStreamReceiver = mpsc::Receiver<Result<ChunkStream, String>>;
 
 pub type ChunkReceiver = futures_mpsc::Receiver<ChunkResult>;
 pub type ChunkResult = Result<Chunk, hyper::Error>;
@@ -45,77 +40,79 @@ pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(
 }
 
 fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_max_size: u64) -> Result<(), StreamSplitterError> {
+    let mut chunk_stream = None;
+    let mut stream_size: u64 = 0;
     let mut offset: u64 = 0;
 
-    let mut stream_size: u64 = 0;
-    let (mut tx, rx) = futures_mpsc::channel(0);
-    chunk_streams.send(ChunkStream::Stream(offset, rx))?;
+    loop {
+        let message = match data_stream.recv() {
+            Ok(message) => message,
+            Err(_) => return Err(StreamSplitterError(
+                "Unable to receive a new message: the sender has been closed")),
+        };
 
-    for data_result in data_stream.iter() {
-        let mut data = match data_result {
+        let mut data = match message {
             Ok(Data::Payload(data)) => data,
             Ok(Data::EofWithChecksum(checksum)) => {
-                // FIXME
-                drop(tx);
-                chunk_streams.send(ChunkStream::EofWithCheckSum(offset, checksum))?;
-
-                // FIXME
-                // Ensure that this error result is the last in the stream and we aren't skipping
-                // any data.
-//                data_stream.recv().unwrap_err();
-
-                return Ok(());
+                chunk_stream.take();
+                chunk_streams.send(Ok(ChunkStream::EofWithCheckSum(offset, checksum)))?;
+                break;
             },
             Err(err) => {
-                // FIXME: https://github.com/tokio-rs/tokio-proto/blob/42ddd45cd34fde8ddd12bdf49a8147762787bf33/src/streaming/pipeline/advanced.rs#L329
-                // FIXME
-                drop(tx);
-                chunk_streams.send(ChunkStream::Error(err.to_string()))?;
-
-                // FIXME
-//                let err = io::Error::new(io::ErrorKind::Other, err.to_string()).into();
-//                tx.send(Err(err)).wait()?;
-
-                // Ensure that this error result is the last in the stream and we aren't skipping
-                // any data.
-//                data_stream.recv().unwrap_err();
-
-                return Ok(());
+                // Attention:
+                // We can't send errors via chunk streams, because it's not supported yet: tokio
+                // panics here - https://github.com/tokio-rs/tokio-proto/blob/42ddd45cd34fde8ddd12bdf49a8147762787bf33/src/streaming/pipeline/advanced.rs#L329
+                chunk_stream.take();
+                chunk_streams.send(Err(err))?;
+                break;
             }
         };
 
         loop {
-            let available_size = stream_max_size - stream_size;
             let data_size = data.len() as u64;
+            if data_size == 0 {
+                break;
+            }
+
+            if chunk_stream.is_none() {
+                let (tx, rx) = futures_mpsc::channel(0);
+
+                chunk_stream = Some(tx);
+                stream_size = 0;
+
+                chunk_streams.send(Ok(ChunkStream::Stream(offset, rx)))?;
+            }
+
+            let available_size = stream_max_size - stream_size;
 
             if available_size >= data_size {
-                if data_size > 0 {
-                    tx = tx.send(Ok(data.into())).wait()?;
-                    stream_size += data_size;
-                    offset += data_size;
-                }
-
+                chunk_stream = Some(chunk_stream.unwrap().send(Ok(data.into())).wait()?);
+                stream_size += data_size;
+                offset += data_size;
                 break;
             }
 
             if available_size > 0 {
-                tx.send(Ok(data.slice_to(available_size as usize).into())).wait()?;
+                chunk_stream.take().unwrap().send(
+                    Ok(data.slice_to(available_size as usize).into())).wait()?;
                 data = data.slice_from(available_size as usize);
+                stream_size += available_size;
                 offset += available_size;
+            } else {
+                chunk_stream.take();
             }
-
-            let (new_tx, new_rx) = futures_mpsc::channel(0);
-            tx = new_tx;
-            chunk_streams.send(ChunkStream::Stream(offset, new_rx))?;
-            stream_size = 0;
         }
+    }
+
+    if let Ok(_) = data_stream.recv() {
+        return Err(StreamSplitterError("Got a message after a termination message"))
     }
 
     Ok(())
 }
 
 #[derive(Debug)]
-pub struct StreamSplitterError(String);
+struct StreamSplitterError(&'static str);
 
 impl Error for StreamSplitterError {
     fn description(&self) -> &str {
@@ -131,12 +128,12 @@ impl fmt::Display for StreamSplitterError {
 
 impl<T> From<mpsc::SendError<T>> for StreamSplitterError {
     fn from(_err: mpsc::SendError<T>) -> StreamSplitterError {
-        StreamSplitterError("Unable to send a new stream: the receiver has been closed".to_owned())
+        StreamSplitterError("Unable to send a new stream: the receiver has been closed")
     }
 }
 
 impl<T> From<futures_mpsc::SendError<T>> for StreamSplitterError {
     fn from(_err: futures_mpsc::SendError<T>) -> StreamSplitterError {
-        StreamSplitterError("Unable to send a new chunk: the receiver has been closed".to_owned())
+        StreamSplitterError("Unable to send a new chunk: the receiver has been closed")
     }
 }

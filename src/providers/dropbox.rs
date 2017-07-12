@@ -192,7 +192,7 @@ impl WriteProvider for Dropbox {
 
         for result in chunk_streams.iter() {
             match result {
-                ChunkStream::Stream(offset, chunk_stream) => {
+                Ok(ChunkStream::Stream(offset, chunk_stream)) => {
                     let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
                         cursor: Cursor {
                             session_id: &start_response.session_id,
@@ -200,7 +200,7 @@ impl WriteProvider for Dropbox {
                         },
                     }, chunk_stream)?;
                 },
-                ChunkStream::EofWithCheckSum(size, checksum) => {
+                Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
                     // FIXME: We need some EOF markers
                     error!("Checksum {}", checksum);
 
@@ -219,7 +219,7 @@ impl WriteProvider for Dropbox {
 
                     return Ok(());
                 }
-                ChunkStream::Error(err) => {
+                Err(err) => {
                     return Err(err.into());
                 },
             }

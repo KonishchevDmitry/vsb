@@ -162,21 +162,16 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
 fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) -> EmptyResult {
     let mut archive = tar::Builder::new(encryptor);
 
-    // FIXME
-    if let Err(err) = archive.append_dir_all(backup_name, backup_path.to_owned() + "ZZZ") {
+    if let Err(err) = archive.append_dir_all(backup_name, backup_path) {
         let _ = archive.finish();
-        let _ = archive.into_inner().unwrap().finish(Some(err.to_string()));
-        return Err(err.into())
+        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err().into());
     }
 
     if let Err(err) = archive.finish() {
-        let _ = archive.into_inner().unwrap().finish(Some(err.to_string()));
-        return Err(err.into())
+        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err().into());
     }
 
-    archive.into_inner().unwrap().finish(None)?;
-
-    Ok(())
+    archive.into_inner().unwrap().finish(None)
 }
 
 pub type BackupGroups = BTreeMap<String, Backups>;
