@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 
@@ -6,7 +5,6 @@ use core::GenericResult;
 
 use futures::Stream;
 use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
-use hyper::client::HttpConnector;
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper::Body;
 use hyper_tls::HttpsConnector;

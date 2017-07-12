@@ -7,6 +7,7 @@ use tar;
 use core::{EmptyResult, GenericResult};
 use encryptor::Encryptor;
 use provider::{ProviderType, ReadProvider, WriteProvider, FileType};
+use stream_splitter;
 use util;
 
 pub struct Storage {
@@ -71,29 +72,41 @@ impl Storage {
 
     pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
-        let (encryptor, chunks) = Encryptor::new(encryption_passphrase)?;
+        let (encryptor, data_stream) = Encryptor::new(encryption_passphrase)?;
 
         let backup_name = backup_name.to_owned();
         let local_backup_path = local_backup_path.to_owned();
         let cloud_backup_path = self.get_backup_path(group_name, &backup_name);
 
-        let archive_thread = thread::Builder::new().name("backup archiving thread".into()).spawn(move || {
+        // FIXME: Stream size
+        let (chunk_streams, splitter_thread) = stream_splitter::split(
+            data_stream, 10 * 1024 * 1024)?;
+
+        let archive_thread = match thread::Builder::new().name("backup archiving thread".into()).spawn(move || {
             archive_backup(&backup_name, &local_backup_path, encryptor)
-        }).map_err(|e| {
-            format!("Unable to spawn a thread: {}", e)
-        })?;
+        }) {
+            Ok(handle) => handle,
+            Err(err) => {
+                util::join_thread_ignoring_result(splitter_thread);
+                return Err!("Unable to spawn a thread: {}", err);
+            },
+        };
 
         let upload_result = self.provider.write().and_then(move |provider| {
-            drop(chunks);
-            Ok(())
-//            provider.upload_file(&cloud_backup_path, chunks)
+            provider.upload_file(&cloud_backup_path, chunk_streams)
         });
 
         let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
             "Archive operation has failed: {}", e));
 
+        let splitter_result = util::join_thread(splitter_thread);
+
+        // The real error should always be here, but...
         upload_result?;
+
+        // ... just in case, check these results too, to not miss anything.
         archive_result?;
+        splitter_result?;
 
         Ok(())
     }

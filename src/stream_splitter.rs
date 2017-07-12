@@ -11,14 +11,16 @@ use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
 
+pub type DataSender = mpsc::SyncSender<GenericResult<Bytes>>;
 pub type DataReceiver = mpsc::Receiver<GenericResult<Bytes>>;
-pub type ChunkStreamSender = mpsc::SyncSender<(usize, ChunkReceiver)>;
-pub type ChunkStreamReceiver = mpsc::Receiver<(usize, ChunkReceiver)>;
+
+pub type ChunkStreamSender = mpsc::SyncSender<(u64, ChunkReceiver)>;
+pub type ChunkStreamReceiver = mpsc::Receiver<(u64, ChunkReceiver)>;
 
 pub type ChunkReceiver = futures_mpsc::Receiver<ChunkResult>;
 pub type ChunkResult = Result<Chunk, hyper::Error>;
 
-pub fn split(data_stream: DataReceiver, stream_max_size: usize) -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)> {
+pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)> {
     let (streams_tx, streams_rx) = mpsc::sync_channel(0);
 
     let splitter_thread = thread::Builder::new().name("stream splitter".into()).spawn(move || {
@@ -28,10 +30,11 @@ pub fn split(data_stream: DataReceiver, stream_max_size: usize) -> GenericResult
     Ok((streams_rx, splitter_thread))
 }
 
-fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_max_size: usize) -> Result<(), StreamSplitterError> {
-    let mut offset = 0;
+// FIXME: We need some EOF markers
+fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_max_size: u64) -> Result<(), StreamSplitterError> {
+    let mut offset: u64 = 0;
 
-    let mut stream_size: usize = 0;
+    let mut stream_size: u64 = 0;
     let (mut tx, rx) = futures_mpsc::channel(0);
     chunk_streams.send((offset, rx))?;
 
@@ -52,7 +55,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
 
         loop {
             let available_size = stream_max_size - stream_size;
-            let data_size = data.len();
+            let data_size = data.len() as u64;
 
             if available_size >= data_size {
                 if data_size > 0 {
@@ -65,8 +68,8 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
             }
 
             if available_size > 0 {
-                tx.send(Ok(data.slice_to(available_size).into())).wait()?;
-                data = data.slice_from(available_size);
+                tx.send(Ok(data.slice_to(available_size as usize).into())).wait()?;
+                data = data.slice_from(available_size as usize);
                 offset += available_size;
             }
 

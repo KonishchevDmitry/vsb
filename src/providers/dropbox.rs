@@ -9,7 +9,8 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
-use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType, ChunkReceiver};
+use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use stream_splitter::ChunkStreamReceiver;
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
@@ -149,7 +150,7 @@ impl WriteProvider for Dropbox {
         Ok(())
     }
 
-    fn upload_file(&self, path: &str, data: ChunkReceiver) -> EmptyResult {
+    fn upload_file(&self, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
         #[derive(Serialize)]
         struct StartRequest {
         }
@@ -162,8 +163,6 @@ impl WriteProvider for Dropbox {
         #[derive(Serialize)]
         struct AppendRequest<'a> {
             cursor: Cursor<'a>,
-            // FIXME
-            close: bool,
         }
 
         #[derive(Serialize)]
@@ -186,20 +185,25 @@ impl WriteProvider for Dropbox {
 
         let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{}, "")?;
 
-        // FIXME: Upload limits
-        let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
-            cursor: Cursor {
-                session_id: &start_response.session_id,
-                offset: 0,
-            },
-            close: true,
-        }, data)?;
+        let mut offset = 0;
+
+        // FIXME: We need some EOF markers
+        for (stream_offset, chunk_stream) in chunk_streams.iter() {
+            offset = stream_offset;
+
+            let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
+                cursor: Cursor {
+                    session_id: &start_response.session_id,
+                    offset: stream_offset,
+                },
+            }, chunk_stream)?;
+        }
 
         // FIXME: Verify checksum?
         let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
             cursor: Cursor {
                 session_id: &start_response.session_id,
-                offset: 2,
+                offset: offset,
             },
             commit: Commit {
                 path: path,

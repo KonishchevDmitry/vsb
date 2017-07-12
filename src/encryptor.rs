@@ -2,27 +2,26 @@ use std::fs::File;
 use std::io::{self, Read, BufReader, BufRead, Write, BufWriter};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time;
 
-use futures::{Future, Sink};
-use futures::sync::mpsc;
 use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
-use provider::{ChunkReceiver, ChunkResult};
+use stream_splitter::{DataSender, DataReceiver};
 use util;
 
 pub struct Encryptor {
     pid: i32,
     stdin: Option<BufWriter<ChildStdin>>,
     stdout_reader: Option<JoinHandle<EmptyResult>>,
-    encrypted_chunks_tx: Option<mpsc::Sender<ChunkResult>>,
+    encrypted_data_tx: Option<DataSender>,
     result: Option<EmptyResult>,
 }
 
 impl Encryptor {
-    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, ChunkReceiver)> {
+    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, DataReceiver)> {
         debug!("Spawning a gpg process to handle data encryption...");
 
         // Buffer is for the following reasons:
@@ -31,7 +30,7 @@ impl Encryptor {
         //    been used yet (hasn't been written to):
         //    * One buffer slot for gpg overhead around an empty payload.
         //    * One buffer slot for our error message.
-        let (tx, rx) = mpsc::channel(2);
+        let (tx, rx) = mpsc::sync_channel(2);
 
         let (passphrase_read_fd, passphrase_write_fd) = unistd::pipe2(fcntl::O_CLOEXEC)
             .map_err(|e| format!("Unable to create a pipe: {}", e))?;
@@ -65,7 +64,7 @@ impl Encryptor {
             pid: pid,
             stdin: Some(stdin),
             stdout_reader: Some(stdout_reader),
-            encrypted_chunks_tx: Some(encrypted_chunks_tx),
+            encrypted_data_tx: Some(encrypted_chunks_tx),
             result: None,
         };
 
@@ -102,7 +101,7 @@ impl Encryptor {
                 }
             }
 
-            if let Some(encrypted_chunks_tx) = self.encrypted_chunks_tx.take() {
+            if let Some(encrypted_chunks_tx) = self.encrypted_data_tx.take() {
                 if let Err(ref err) = result {
                     let _ = encrypted_chunks_tx.send(Err(
                         io_error_from_string(err.to_string()).into()));
@@ -148,7 +147,7 @@ impl io::Write for Encryptor {
     }
 }
 
-fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
+fn stdout_reader(mut gpg: Child, tx: DataSender) -> EmptyResult {
     let mut stderr = gpg.stderr.take().unwrap();
     let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
@@ -185,7 +184,7 @@ fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
     Ok(())
 }
 
-fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
+fn read_data(mut stdout: BufReader<ChildStdout>, tx: DataSender) -> EmptyResult {
     // FIXME
 //    let mut out = File::create("backup-mock.tar.gpg").unwrap();
 
@@ -199,11 +198,8 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResul
             // FIXME
 //            out.write_all(data)?;
 
-            // FIXME
-            tx = tx.send(Ok(data.to_vec().into())).wait().map_err(|e| {
-                error!("Receiver has closed connection");
-                format!("Connection is closed: {}", e)
-            })?;
+            tx.send(Ok(data.into())).map_err(|_|
+                "Unable to send encrypted data: the receiver has been closed".to_owned())?;
 
             data.len()
         };
