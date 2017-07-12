@@ -6,7 +6,7 @@ pub trait Hasher: io::Write + Send {
     fn finish(self: Box<Self>) -> String;
 }
 
-pub struct Sha256 {
+pub struct ChunkedSha256 {
     block_size: usize,
     available_size: usize,
 
@@ -14,9 +14,9 @@ pub struct Sha256 {
     result_hasher: sha2::Sha256,
 }
 
-impl Sha256 {
-    pub fn new(block_size: usize) -> Sha256 {
-        Sha256 {
+impl ChunkedSha256 {
+    pub fn new(block_size: usize) -> ChunkedSha256 {
+        ChunkedSha256 {
             block_size: block_size,
             available_size: block_size,
             block_hasher: sha2::Sha256::default(),
@@ -31,7 +31,7 @@ impl Sha256 {
     }
 }
 
-impl Hasher for Sha256 {
+impl Hasher for ChunkedSha256 {
     fn finish(mut self: Box<Self>) -> String {
         if self.available_size != self.block_size {
             self.consume_block();
@@ -41,7 +41,7 @@ impl Hasher for Sha256 {
     }
 }
 
-impl io::Write for Sha256 {
+impl io::Write for ChunkedSha256 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let data_size = buf.len();
         let available_size = self.available_size;

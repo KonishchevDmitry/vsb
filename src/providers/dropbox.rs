@@ -8,7 +8,7 @@ use serde::de;
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
-use hash::{Hasher, Sha256};
+use hash::{Hasher, ChunkedSha256};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
@@ -130,8 +130,8 @@ impl ReadProvider for Dropbox {
                     name: entry.name.clone(),
                     type_: match entry.tag.as_str() {
                         "folder" => FileType::Directory,
-                        // FIXME: other
-                        _ => FileType::File,
+                        "file" => FileType::File,
+                        _ => FileType::Other,
                     },
                 })
             }
@@ -154,7 +154,7 @@ impl ReadProvider for Dropbox {
 
 impl WriteProvider for Dropbox {
     fn hasher(&self) -> Box<Hasher> {
-        Box::new(Sha256::new(4 * 1024 * 1024))
+        Box::new(ChunkedSha256::new(4 * 1024 * 1024))
     }
 
     fn create_directory(&self, path: &str) -> EmptyResult {
