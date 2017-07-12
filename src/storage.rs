@@ -99,6 +99,7 @@ impl Storage {
 
         let splitter_result = util::join_thread(splitter_thread);
 
+        // FIXME: Actually, no and on tar writting error we upload the broken backup
         // The real error should always be here, but...
         upload_result?;
 

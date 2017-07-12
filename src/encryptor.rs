@@ -173,9 +173,11 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> EmptyRe
         err
     })?;
 
+    // FIXME
     util::join_thread(stderr_reader.take().unwrap())?;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
+    // FIXME: checksum here
     if status.success() {
         debug!("gpg process has terminated with successful exit code.")
     } else {

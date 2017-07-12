@@ -192,7 +192,7 @@ impl WriteProvider for Dropbox {
 
         for result in chunk_streams.iter() {
             match result {
-                ChunkStream::Receiver(offset, chunk_stream) => {
+                ChunkStream::Stream(offset, chunk_stream) => {
                     let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
                         cursor: Cursor {
                             session_id: &start_response.session_id,
