@@ -1,5 +1,6 @@
 extern crate ansi_term;
 extern crate atty;
+extern crate bytes;
 extern crate chrono;
 extern crate clap;
 extern crate fern;
@@ -30,6 +31,7 @@ mod logging;
 mod provider;
 mod providers;
 mod storage;
+mod stream_splitter;
 mod sync;
 mod util;
 

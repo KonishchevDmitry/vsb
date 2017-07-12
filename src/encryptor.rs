@@ -7,7 +7,6 @@ use std::time;
 
 use futures::{Future, Sink};
 use futures::sync::mpsc;
-use hyper;
 use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
@@ -188,7 +187,7 @@ fn stdout_reader(mut gpg: Child, tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
 
 fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResult>) -> EmptyResult {
     // FIXME
-    let mut out = File::create("backup-mock.tar.gpg").unwrap();
+//    let mut out = File::create("backup-mock.tar.gpg").unwrap();
 
     loop {
         let size = {
@@ -197,7 +196,8 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut tx: mpsc::Sender<ChunkResul
                 break;
             }
 
-            out.write_all(data)?;
+            // FIXME
+//            out.write_all(data)?;
 
             // FIXME
             tx = tx.send(Ok(data.to_vec().into())).wait().map_err(|e| {

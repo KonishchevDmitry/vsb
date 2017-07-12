@@ -6,6 +6,7 @@ authors = ["Dmitry Konishchev"]
 [dependencies]
 ansi_term = "*"
 atty = "*"
+bytes = "*"
 chrono = "*"
 clap = "*"
 fern = "*"
