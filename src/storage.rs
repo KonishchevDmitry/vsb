@@ -72,7 +72,8 @@ impl Storage {
 
     pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
-        let (encryptor, data_stream) = Encryptor::new(encryption_passphrase)?;
+        let provider = self.provider.write()?;
+        let (encryptor, data_stream) = Encryptor::new(encryption_passphrase, provider.hasher())?;
 
         let backup_name = backup_name.to_owned();
         let local_backup_path = local_backup_path.to_owned();
@@ -92,10 +93,7 @@ impl Storage {
             },
         };
 
-        let upload_result = self.provider.write().and_then(move |provider| {
-            provider.upload_file(&cloud_backup_path, chunk_streams)
-        });
-
+        let upload_result = provider.upload_file(&cloud_backup_path, chunk_streams);
         let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
             "Archive operation has failed: {}", e));
 
@@ -177,7 +175,7 @@ pub type Backups = BTreeSet<String>;
 // to emulate it via this trait.
 trait AbstractProvider {
     fn read(&self) -> &ReadProvider;
-    fn write(&mut self) -> GenericResult<&WriteProvider>;
+    fn write(&self) -> GenericResult<&WriteProvider>;
 }
 
 struct ReadOnlyProviderAdapter<T: ReadProvider> {
@@ -189,7 +187,7 @@ impl<T: ReadProvider> AbstractProvider for ReadOnlyProviderAdapter<T> {
         &self.provider
     }
 
-    fn write(&mut self) -> GenericResult<&WriteProvider> {
+    fn write(&self) -> GenericResult<&WriteProvider> {
         Err!("An attempt to modify a read-only backup storage")
     }
 }
@@ -203,7 +201,7 @@ impl<T: ReadProvider + WriteProvider> AbstractProvider for ReadWriteProviderAdap
         &self.provider
     }
 
-    fn write(&mut self) -> GenericResult<&WriteProvider> {
+    fn write(&self) -> GenericResult<&WriteProvider> {
         Ok(&self.provider)
     }
 }

@@ -9,7 +9,8 @@ use std::time;
 use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
-use stream_splitter::{DataSender, DataReceiver};
+use hash::Hasher;
+use stream_splitter::{DataSender, DataReceiver, Data};
 use util;
 
 pub struct Encryptor {
@@ -21,7 +22,7 @@ pub struct Encryptor {
 }
 
 impl Encryptor {
-    pub fn new(encryption_passphrase: &str) -> GenericResult<(Encryptor, DataReceiver)> {
+    pub fn new(encryption_passphrase: &str, hasher: Box<Hasher>) -> GenericResult<(Encryptor, DataReceiver)> {
         debug!("Spawning a gpg process to handle data encryption...");
 
         // Buffer is for the following reasons:
@@ -54,7 +55,7 @@ impl Encryptor {
         let encrypted_chunks_tx = tx.clone();
 
         let stdout_reader = thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
-            stdout_reader(gpg, tx)
+            stdout_reader(gpg, hasher, tx)
         }).map_err(|e| {
             terminate_gpg(pid);
             format!("Unable to spawn a thread: {}", e)
@@ -147,7 +148,7 @@ impl io::Write for Encryptor {
     }
 }
 
-fn stdout_reader(mut gpg: Child, tx: DataSender) -> EmptyResult {
+fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> EmptyResult {
     let mut stderr = gpg.stderr.take().unwrap();
     let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
         let mut error = String::new();
@@ -166,7 +167,7 @@ fn stdout_reader(mut gpg: Child, tx: DataSender) -> EmptyResult {
 
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
 
-    read_data(stdout, tx).map_err(|err| {
+    read_data(stdout, hasher, tx).map_err(|err| {
         terminate_gpg(gpg.id() as i32);
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
@@ -184,25 +185,26 @@ fn stdout_reader(mut gpg: Child, tx: DataSender) -> EmptyResult {
     Ok(())
 }
 
-fn read_data(mut stdout: BufReader<ChildStdout>, tx: DataSender) -> EmptyResult {
-    // FIXME
-//    let mut out = File::create("backup-mock.tar.gpg").unwrap();
-
+fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: DataSender) -> EmptyResult {
     loop {
         let size = {
-            let data = stdout.fill_buf().map_err(|e| format!("gpg stdout reading error: {}", e))?;
-            if data.len() == 0 {
+            let encrypted_data = stdout.fill_buf().map_err(|e| format!(
+                "gpg stdout reading error: {}", e))?;
+
+            if encrypted_data.is_empty() {
+                let checksum = hasher.finish();
+                tx.send(Ok(Data::EofWithChecksum(checksum))).map_err(|_|
+                    "Unable to send encrypted data: the receiver has been closed".to_owned())?;
                 break;
             }
 
-            // FIXME
-//            out.write_all(data)?;
-
-            tx.send(Ok(data.into())).map_err(|_|
+            hasher.write_all(encrypted_data).unwrap();
+            tx.send(Ok(Data::Payload(encrypted_data.into()))).map_err(|_|
                 "Unable to send encrypted data: the receiver has been closed".to_owned())?;
 
-            data.len()
+            encrypted_data.len()
         };
+
         stdout.consume(size);
     }
 

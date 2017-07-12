@@ -43,6 +43,8 @@ impl Drop for GlobalContext {
 pub fn init() -> Result<(), SetLoggerError> {
     let debug_mode = cfg!(debug_assertions);
 
+    // FIXME: Streams interleaving
+
     let stdout_dispatcher =
         configure_formatter(Dispatch::new(), debug_mode, atty::is(atty::Stream::Stdout))
         .filter(|metadata| {metadata.level() >= LogLevel::Info})

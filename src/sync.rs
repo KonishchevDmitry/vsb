@@ -50,7 +50,14 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
             },
         };
 
+        // FIXME
+        let mut first = true;
         for backup_name in target_backups.iter() {
+            if first {
+                first = false;
+                continue;
+            }
+
             if cloud_backups.contains(backup_name) {
                 continue;
             }

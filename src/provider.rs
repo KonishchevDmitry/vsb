@@ -1,6 +1,7 @@
 use std::fmt;
 
 use core::{GenericResult, EmptyResult};
+use hash::Hasher;
 use stream_splitter::ChunkStreamReceiver;
 
 pub trait Provider {
@@ -13,6 +14,7 @@ pub trait ReadProvider: Provider {
 }
 
 pub trait WriteProvider: Provider {
+    fn hasher(&self) -> Box<Hasher>;
     fn create_directory(&self, path: &str) -> EmptyResult;
     fn upload_file(&self, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult;
 }

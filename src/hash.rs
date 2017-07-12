@@ -2,8 +2,8 @@ use std::io;
 
 use sha2::{self, Digest};
 
-pub trait Hasher: io::Write {
-    fn finish(self) -> String;
+pub trait Hasher: io::Write + Send {
+    fn finish(self: Box<Self>) -> String;
 }
 
 pub struct Sha256 {
@@ -32,7 +32,7 @@ impl Sha256 {
 }
 
 impl Hasher for Sha256 {
-    fn finish(mut self) -> String {
+    fn finish(mut self: Box<Self>) -> String {
         if self.available_size != self.block_size {
             self.consume_block();
         }

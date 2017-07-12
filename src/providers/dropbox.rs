@@ -8,9 +8,10 @@ use serde::de;
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
+use hash::{Hasher, Sha256};
 use http_client::{HttpClient, EmptyResponse, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use stream_splitter::ChunkStreamReceiver;
+use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
@@ -137,6 +138,10 @@ impl ReadProvider for Dropbox {
 }
 
 impl WriteProvider for Dropbox {
+    fn hasher(&self) -> Box<Hasher> {
+        Box::new(Sha256::new(4 * 1024 * 1024))
+    }
+
     fn create_directory(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct Request<'a> {
@@ -185,33 +190,40 @@ impl WriteProvider for Dropbox {
 
         let start_response: StartResponse = self.content_request("/files/upload_session/start", &StartRequest{}, "")?;
 
-        let mut offset = 0;
-
-        // FIXME: We need some EOF markers
-        for (stream_offset, chunk_stream) in chunk_streams.iter() {
-            offset = stream_offset;
-
-            let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
-                cursor: Cursor {
-                    session_id: &start_response.session_id,
-                    offset: stream_offset,
+        for result in chunk_streams.iter() {
+            match result {
+                ChunkStream::Receiver(offset, chunk_stream) => {
+                    let _: Option<EmptyResponse> = self.content_request("/files/upload_session/append_v2", &AppendRequest{
+                        cursor: Cursor {
+                            session_id: &start_response.session_id,
+                            offset: offset,
+                        },
+                    }, chunk_stream)?;
                 },
-            }, chunk_stream)?;
+                ChunkStream::EofWithCheckSum(size, checksum) => {
+                    // FIXME: We need some EOF markers
+                    error!("Checksum {}", checksum);
+
+                    // FIXME: Verify checksum?
+                    let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
+                        cursor: Cursor {
+                            session_id: &start_response.session_id,
+                            // FIXME: invalid offset
+                            offset: size,
+                        },
+                        commit: Commit {
+                            path: path,
+                            mode: "overwrite",
+                        },
+                    }, "")?;
+
+                    return Ok(());
+                }
+            }
         }
 
-        // FIXME: Verify checksum?
-        let _: EmptyResponse = self.content_request("/files/upload_session/finish", &FinishRequest{
-            cursor: Cursor {
-                session_id: &start_response.session_id,
-                offset: offset,
-            },
-            commit: Commit {
-                path: path,
-                mode: "overwrite",
-            },
-        }, "")?;
-
-        Ok(())
+        // FIXME
+        panic!("Logical error");
     }
 }
 

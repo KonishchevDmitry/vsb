@@ -11,11 +11,25 @@ use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
 
-pub type DataSender = mpsc::SyncSender<GenericResult<Bytes>>;
-pub type DataReceiver = mpsc::Receiver<GenericResult<Bytes>>;
+// FIXME: naming
+#[derive(Debug)]
+pub enum Data {
+    Payload(Bytes),
+    EofWithChecksum(String),
+}
 
-pub type ChunkStreamSender = mpsc::SyncSender<(u64, ChunkReceiver)>;
-pub type ChunkStreamReceiver = mpsc::Receiver<(u64, ChunkReceiver)>;
+pub type DataSender = mpsc::SyncSender<GenericResult<Data>>;
+pub type DataReceiver = mpsc::Receiver<GenericResult<Data>>;
+
+// FIXME: naming
+#[derive(Debug)]
+pub enum ChunkStream {
+    Receiver(u64, ChunkReceiver),
+    EofWithCheckSum(u64, String),
+}
+
+pub type ChunkStreamSender = mpsc::SyncSender<ChunkStream>;
+pub type ChunkStreamReceiver = mpsc::Receiver<ChunkStream>;
 
 pub type ChunkReceiver = futures_mpsc::Receiver<ChunkResult>;
 pub type ChunkResult = Result<Chunk, hyper::Error>;
@@ -30,20 +44,37 @@ pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(
     Ok((streams_rx, splitter_thread))
 }
 
-// FIXME: We need some EOF markers
 fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_max_size: u64) -> Result<(), StreamSplitterError> {
     let mut offset: u64 = 0;
 
     let mut stream_size: u64 = 0;
+    debug!("created"); // FIXME
     let (mut tx, rx) = futures_mpsc::channel(0);
-    chunk_streams.send((offset, rx))?;
+    chunk_streams.send(ChunkStream::Receiver(offset, rx))?;
 
     for data_result in data_stream.iter() {
+        debug!("result {:?}", data_result);
         let mut data = match data_result {
-            Ok(data) => data,
+            Ok(Data::Payload(data)) => data,
+            Ok(Data::EofWithChecksum(checksum)) => {
+                // FIXME
+                drop(tx);
+                debug!("res>");
+                chunk_streams.send(ChunkStream::EofWithCheckSum(offset, checksum))?;
+                debug!("res<");
+
+                // FIXME
+                // Ensure that this error result is the last in the stream and we aren't skipping
+                // any data.
+//                data_stream.recv().unwrap_err();
+
+                return Ok(());
+            },
             Err(err) => {
                 let err = io::Error::new(io::ErrorKind::Other, err.to_string()).into();
+                debug!("sending"); // FIXME
                 tx.send(Err(err)).wait()?;
+                debug!("closed"); // FIXME
 
                 // Ensure that this error result is the last in the stream and we aren't skipping
                 // any data.
@@ -59,7 +90,9 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
 
             if available_size >= data_size {
                 if data_size > 0 {
+                    debug!("sending"); // FIXME
                     tx = tx.send(Ok(data.into())).wait()?;
+                    debug!("sent"); // FIXME
                     stream_size += data_size;
                     offset += data_size;
                 }
@@ -68,17 +101,24 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
             }
 
             if available_size > 0 {
+                debug!("sending"); // FIXME
                 tx.send(Ok(data.slice_to(available_size as usize).into())).wait()?;
+                debug!("closed"); // FIXME
                 data = data.slice_from(available_size as usize);
                 offset += available_size;
             }
 
+            debug!("created"); // FIXME
             let (new_tx, new_rx) = futures_mpsc::channel(0);
             tx = new_tx;
-            chunk_streams.send((offset, new_rx))?;
+            chunk_streams.send(ChunkStream::Receiver(offset, new_rx))?;
             stream_size = 0;
         }
+
+        debug!("waiting...");
     }
+
+    debug!("eof");
 
     Ok(())
 }
