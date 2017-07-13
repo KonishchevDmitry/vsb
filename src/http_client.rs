@@ -6,7 +6,7 @@ use std::time::{Instant, Duration};
 use core::GenericResult;
 
 use futures::{Future, Stream};
-use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
+use hyper::{self, Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper::Body;
 use hyper_tls::HttpsConnector;
@@ -91,16 +91,15 @@ impl HttpClient {
         // when server responds before we complete sending our request (for example with 413 Payload
         // Too Large status code), request body gets leaked probably somewhere in connection pool,
         // so body's mpsc::Receiver doesn't gets closed and sender hangs on it forever.
-        let mut core = Core::new().map_err(HttpClientError::generic_from)?;
+        let mut core = Core::new()?;
         let handle = core.handle();
-        let https_connector = HttpsConnector::new(1, &handle)
-            .map_err(HttpClientError::generic_from)?;
+        let https_connector = HttpsConnector::new(1, &handle).map_err(HttpClientError::generic_from)?;
         let client =  Client::configure().connector(https_connector).build(&handle);
 
         // Sadly, but for now it seems to be impossible to set socket or per-chunk timeout in hyper,
         // so we have to always operate with request timeout.
         let timeout_time = Instant::now() + request_timeout;
-        let timeout = Timeout::new_at(timeout_time, &handle).map_err(HttpClientError::generic_from)?.and_then(|_| {
+        let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP request timeout"))
         }).map_err(|e| {
             e.into()
@@ -108,7 +107,7 @@ impl HttpClient {
 
         let response: Response = match core.run(client.request(http_request).select(timeout)) {
             Ok((response, _)) => Ok(response),
-            Err((err, _)) => Err(HttpClientError::generic_from(err)),
+            Err((err, _)) => Err(err),
         }?;
 
         // Response::body() borrows Response, so we have to store all fields that we need later
@@ -116,7 +115,7 @@ impl HttpClient {
         let content_type = response.headers().get::<ContentType>().map(
             |header_ref| header_ref.clone());
 
-        let timeout = Timeout::new_at(timeout_time, &handle).map_err(HttpClientError::generic_from)?.and_then(|_| {
+        let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP response receiving timeout"))
         }).map_err(|e| {
             e.into()
@@ -124,7 +123,7 @@ impl HttpClient {
 
         let body: Chunk = match core.run(response.body().concat2().select(timeout)) {
             Ok((body, _)) => Ok(body),
-            Err((err, _)) => Err(HttpClientError::generic_from(err)),
+            Err((err, _)) => Err(err),
         }?;
 
         let body = String::from_utf8(body.to_vec()).map_err(|e|
@@ -133,8 +132,8 @@ impl HttpClient {
 
         if status != StatusCode::Ok {
             return if status.is_client_error() || status.is_server_error() {
-                Err(HttpClientError::Api(
-                    parse_api_error(status, content_type, &body).map_err(HttpClientError::generic_from)?))
+                Err(HttpClientError::Api(parse_api_error(status, content_type, &body)
+                    .map_err(HttpClientError::generic_from)?))
             } else {
                 Err!("Server returned an error: {}", status)
             }
@@ -155,7 +154,6 @@ pub enum HttpClientError<T> {
     Api(T),
 }
 
-// FIXME
 impl<T> HttpClientError<T> {
     pub fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
         HttpClientError::Generic(error.to_string())
@@ -165,7 +163,7 @@ impl<T> HttpClientError<T> {
 impl<T: Error> Error for HttpClientError<T> {
     fn description(&self) -> &str {
         match *self {
-            HttpClientError::Generic(_) => "HTTP client generic error",
+            HttpClientError::Generic(_) => "HTTP client error",
             HttpClientError::Api(ref e) => e.description(),
         }
     }
@@ -180,10 +178,21 @@ impl<T: fmt::Display> fmt::Display for HttpClientError<T> {
     }
 }
 
-// FIXME
 impl<T> From<String> for HttpClientError<T> {
     fn from(err: String) -> HttpClientError<T> {
-        return HttpClientError::Generic(err)
+        HttpClientError::Generic(err)
+    }
+}
+
+impl<T> From<io::Error> for HttpClientError<T> {
+    fn from(err: io::Error) -> HttpClientError<T> {
+        HttpClientError::generic_from(err)
+    }
+}
+
+impl<T> From<hyper::Error> for HttpClientError<T> {
+    fn from(err: hyper::Error) -> HttpClientError<T> {
+        HttpClientError::generic_from(err)
     }
 }
 
