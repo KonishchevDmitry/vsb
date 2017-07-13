@@ -1,12 +1,15 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf, Component};
+use std::process;
 
 use clap::{App, Arg, AppSettings};
+use log::LogLevel;
 use shellexpand;
 use serde_yaml;
 
 use core::GenericResult;
+use logging;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,7 +35,7 @@ pub enum Provider {
     Dropbox {access_token: String},
 }
 
-pub fn load() -> GenericResult<Config> {
+pub fn load() -> Config {
     let default_config_path = "~/.pyvsb_to_cloud.yaml";
 
     let matches = App::new("PyVSB to cloud")
@@ -43,14 +46,39 @@ pub fn load() -> GenericResult<Config> {
             .value_name("PATH")
             .help(&format!("Configuration file path [default: {}]", default_config_path))
             .takes_value(true))
+        .arg(Arg::with_name("verbose")
+            .short("v")
+            .long("verbose")
+            .multiple(true)
+            .help("Sets the level of verbosity"))
         .setting(AppSettings::DisableVersion)
         .get_matches();
+
+    let log_level = match matches.occurrences_of("verbose") {
+        0 => LogLevel::Info,
+        1 => LogLevel::Debug,
+        2 => LogLevel::Trace,
+        _ => {
+            let _ = writeln!(io::stderr(), "Invalid verbosity level.");
+            process::exit(1);
+        }
+    };
+
+    if let Err(err) = logging::init(log_level) {
+        let _ = writeln!(io::stderr(), "Failed to initialize the logging: {}.", err);
+        process::exit(1);
+    }
 
     let config_path = matches.value_of("config").map(ToString::to_string).unwrap_or_else(||
         shellexpand::tilde(default_config_path).to_string());
 
-    Ok(load_config(&config_path).map_err(|e| format!(
-        "Error while reading {:?} configuration file: {}", config_path, e))?)
+    match load_config(&config_path) {
+        Ok(config) => config,
+        Err(err) => {
+            error!("Error while reading {:?} configuration file: {}", config_path, err);
+            process::exit(1);
+        }
+    }
 }
 
 fn load_config(path: &str) -> GenericResult<Config> {

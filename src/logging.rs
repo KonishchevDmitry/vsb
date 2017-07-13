@@ -1,14 +1,16 @@
-use std::io;
+use std::fmt;
+use std::io::{self, Write};
 use std::sync::Mutex;
 
 use ansi_term::Color;
 use atty;
 use chrono;
-use fern::Dispatch;
+use fern::{Dispatch, FormatCallback};
 use log::{LogLevel, LogLevelFilter, SetLoggerError};
 
 lazy_static! {
     static ref GLOBAL_CONTEXT: Mutex<Option<String>> = Mutex::new(None);
+    static ref OUTPUT_MUTEX: Mutex<()> = Mutex::new(());
 }
 
 pub struct GlobalContext {
@@ -40,10 +42,8 @@ impl Drop for GlobalContext {
     }
 }
 
-pub fn init() -> Result<(), SetLoggerError> {
-    let debug_mode = cfg!(debug_assertions);
-
-    // FIXME: Streams interleaving
+pub fn init(level: LogLevel) -> Result<(), SetLoggerError> {
+    let debug_mode = level >= LogLevel::Debug;
 
     let stdout_dispatcher =
         configure_formatter(Dispatch::new(), debug_mode, atty::is(atty::Stream::Stdout))
@@ -56,13 +56,12 @@ pub fn init() -> Result<(), SetLoggerError> {
         .chain(io::stderr());
 
     Dispatch::new()
-        // FIXME
-        .level(LogLevelFilter::Error)
-        .level_for("pyvsb_to_cloud", if debug_mode {
-            LogLevelFilter::Trace
+        .level(if debug_mode {
+            LogLevelFilter::Warn
         } else {
-            LogLevelFilter::Info
+            LogLevelFilter::Off
         })
+        .level_for("pyvsb_to_cloud", level.to_log_level_filter())
         .chain(stdout_dispatcher)
         .chain(stderr_dispatcher)
         .apply()
@@ -73,6 +72,7 @@ fn configure_formatter(dispatcher: Dispatch, debug_mode: bool, colored_output: b
         dispatcher.format(move |out, message, record| {
             let location = record.location();
             let line = location.line();
+            let level = record.level();
 
             let mut file_width = 10;
             let mut line_width = 3;
@@ -92,19 +92,19 @@ fn configure_formatter(dispatcher: Dispatch, debug_mode: bool, colored_output: b
                 file = &file[file.len() - file_width..]
             }
 
-            let level_name = get_level_name(record.level());
+            let level_name = get_level_name(level);
             let time = chrono::Local::now().format("[%T%.3f]");
 
             if colored_output {
-                let level_color = get_level_color(record.level());
-                out.finish(format_args!(
+                let level_color = get_level_color(level);
+                write_log(out, level, format_args!(
                     "{color_prefix}{time} [{file:>file_width$}:{line:0line_width$}] {level}: {context}{message}{color_suffix}",
                     color_prefix=level_color.prefix(), time=time, file=file, file_width=file_width,
                     line=line, line_width=line_width, level=level_name,
                     context=GlobalContext::get(), message=message, color_suffix=level_color.suffix()
                 ));
             } else {
-                out.finish(format_args!(
+                write_log(out, level, format_args!(
                     "{time} [{file:>file_width$}:{line:0line_width$}] {level}: {context}{message}",
                     time=time, file=file, file_width=file_width, line=line, line_width=line_width,
                     level=level_name, context=GlobalContext::get(), message=message
@@ -113,17 +113,18 @@ fn configure_formatter(dispatcher: Dispatch, debug_mode: bool, colored_output: b
         })
     } else {
         dispatcher.format(move |out, message, record| {
-            let level_name = get_level_name(record.level());
+            let level = record.level();
+            let level_name = get_level_name(level);
 
             if colored_output {
-                let level_color = get_level_color(record.level());
-                out.finish(format_args!(
+                let level_color = get_level_color(level);
+                write_log(out, level, format_args!(
                     "{color_prefix}{level}: {context}{message}{color_suffix}",
                     color_prefix=level_color.prefix(), level=level_name,
                     context=GlobalContext::get(), message=message, color_suffix=level_color.suffix()
                 ));
             } else {
-                out.finish(format_args!("{level}: {context}{message}",
+                write_log(out, level, format_args!("{level}: {context}{message}",
                     level=level_name, context=GlobalContext::get(), message=message));
             }
         })
@@ -148,4 +149,18 @@ fn get_level_name(level: LogLevel) -> &'static str {
         LogLevel::Debug => "D",
         LogLevel::Trace => "T",
     }
+}
+
+fn write_log(out: FormatCallback, level: LogLevel, formatted_message: fmt::Arguments) {
+    // Since we write into stdout and stderr we should guard any write with a mutex to not get the
+    // output interleaved.
+    let _lock = OUTPUT_MUTEX.lock();
+
+    out.finish(formatted_message);
+
+    let _ = if level >= LogLevel::Info {
+        io::stdout().flush()
+    } else {
+        io::stderr().flush()
+    };
 }

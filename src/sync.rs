@@ -5,6 +5,9 @@ use storage::{Storage, BackupGroups, Backups};
 
 pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                     max_backup_groups: usize, encryption_passphrase: &str) -> EmptyResult {
+    // FIXME
+    let develop_mode = cfg!(debug_assertions);
+
     let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
@@ -50,10 +53,9 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
             },
         };
 
-        // FIXME
         let mut first = true;
         for backup_name in target_backups.iter() {
-            if first {
+            if develop_mode && first {
                 first = false;
                 continue;
             }
@@ -74,8 +76,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
     }
 
     for (group_name, _) in cloud_groups.iter() {
-        // FIXME
-        if true || !target_groups.contains_key(group_name) {
+        if develop_mode || !target_groups.contains_key(group_name) {
             info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
             if let Err(err) = cloud_storage.delete_backup_group(group_name) {
                 error!("Failed to delete {:?} backup backup group from {}: {}.",
