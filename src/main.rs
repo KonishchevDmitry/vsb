@@ -21,7 +21,11 @@ extern crate shellexpand;
 extern crate tar;
 extern crate tokio_core;
 
+use std::fs::File;
+use std::os::unix::io::AsRawFd;
 use std::process;
+
+use nix::fcntl::{self, FlockArg};
 
 #[macro_use] mod core;
 mod config;
@@ -36,15 +40,27 @@ mod stream_splitter;
 mod sync;
 mod util;
 
-use core::EmptyResult;
+use core::{EmptyResult, GenericResult};
 use logging::GlobalContext;
 use providers::dropbox::Dropbox;
 use providers::filesystem::Filesystem;
 use storage::Storage;
 
 fn main() {
-    let mut exit_code = 0;
+    process::exit(match run(){
+        Ok(exit_code) => exit_code,
+        Err(err) => {
+            error!("{}.", err);
+            1
+        }
+    });
+}
+
+fn run() -> GenericResult<i32> {
     let config = config::load();
+    let _lock = acquire_lock(&config.path)?;
+
+    let mut exit_code = 0;
 
     for backup in config.backups.iter() {
         let _context = GlobalContext::new(&backup.name);
@@ -58,7 +74,23 @@ fn main() {
         }
     }
 
-    process::exit(exit_code);
+    Ok(exit_code)
+}
+
+fn acquire_lock(path: &str) -> GenericResult<File> {
+    let file = File::open(path).map_err(|e| format!("Unable to open {:?}: {}", path, e))?;
+
+    fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|e| {
+        if let nix::Error::Sys(nix::Errno::EAGAIN) = e {
+            format!(concat!(
+                "Unable to exclusively run the program for {:?} configuration file: ",
+                "it's already locked by another process"), path)
+        } else {
+            format!("Unable to flock() {:?}: {}", path, e)
+        }
+    })?;
+
+    Ok(file)
 }
 
 fn sync_backups(backup_config: &config::Backup) -> EmptyResult {

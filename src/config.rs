@@ -14,6 +14,8 @@ use logging;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub path: String,
     pub backups: Vec<Backup>,
 }
 
@@ -84,7 +86,9 @@ pub fn load() -> Config {
 fn load_config(path: &str) -> GenericResult<Config> {
     let mut data = Vec::new();
     File::open(path)?.read_to_end(&mut data)?;
+
     let mut config: Config = serde_yaml::from_slice(&data)?;
+    config.path = path.to_owned();
 
     for backup in config.backups.iter_mut() {
         backup.name = validate_name(&backup.name)?;

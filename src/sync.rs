@@ -13,6 +13,8 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
         false
     };
 
+    // FIXME: Check backups for removal
+
     let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
