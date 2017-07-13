@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 use hyper::Body;
 use hyper::header::{Authorization, Bearer, Headers};
@@ -48,7 +49,7 @@ impl Dropbox {
               O: de::DeserializeOwned,
     {
         let url = API_ENDPOINT.to_owned() + path;
-        return self.client.json_request(&url, request);
+        return self.client.json_request(&url, request, Duration::from_secs(15));
     }
 
     fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<ApiError>>
@@ -62,7 +63,7 @@ impl Dropbox {
         let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
         headers.set_raw("Dropbox-API-Arg", request_json);
 
-        return self.client.upload_request(&url, &headers, body);
+        return self.client.upload_request(&url, &headers, body, Duration::from_secs(60 * 60));
     }
 }
 

@@ -1,9 +1,11 @@
 use std::error::Error;
 use std::fmt;
+use std::io;
+use std::time::{Instant, Duration};
 
 use core::GenericResult;
 
-use futures::Stream;
+use futures::{Future, Stream};
 use hyper::{Client, Method, Request, Headers, Response, StatusCode, Chunk};
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper::Body;
@@ -11,9 +13,9 @@ use hyper_tls::HttpsConnector;
 use mime;
 use serde::{ser, de};
 use serde_json;
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core, Timeout};
 
-// FIXME: timeouts
+
 pub struct HttpClient {
     default_headers: Headers,
 }
@@ -33,7 +35,7 @@ impl HttpClient {
         self
     }
 
-    pub fn json_request<I, O, E>(&self, url: &str, request: &I) -> Result<O, HttpClientError<E>>
+    pub fn json_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
@@ -46,10 +48,10 @@ impl HttpClient {
         headers.set(ContentType::json());
         headers.set(ContentLength(request_json.len() as u64));
 
-        self.process_request(method, url, headers, request_json)
+        self.process_request(method, url, headers, request_json, timeout)
     }
 
-    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I) -> Result<O, HttpClientError<E>>
+    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, request_timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
@@ -68,10 +70,12 @@ impl HttpClient {
         request_headers.set(ContentType::octet_stream());
         request_headers.extend(headers.iter());
 
-        self.process_request(method, url, request_headers, body)
+        self.process_request(method, url, request_headers, body, request_timeout)
     }
 
-    fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I) -> Result<O, HttpClientError<E>>
+    fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
+                                request_timeout: Duration
+    ) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
@@ -93,17 +97,35 @@ impl HttpClient {
             .map_err(HttpClientError::generic_from)?;
         let client =  Client::configure().connector(https_connector).build(&handle);
 
-        let response: Response = core.run(client.request(http_request))
-            .map_err(HttpClientError::generic_from)?;
+        // Sadly, but for now it seems to be impossible to set socket or per-chunk timeout in hyper,
+        // so we have to always operate with request timeout.
+        let timeout_time = Instant::now() + request_timeout;
+        let timeout = Timeout::new_at(timeout_time, &handle).map_err(HttpClientError::generic_from)?.and_then(|_| {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP request timeout"))
+        }).map_err(|e| {
+            e.into()
+        });
+
+        let response: Response = match core.run(client.request(http_request).select(timeout)) {
+            Ok((response, _)) => Ok(response),
+            Err((err, _)) => Err(HttpClientError::generic_from(err)),
+        }?;
 
         // Response::body() borrows Response, so we have to store all fields that we need later
         let status = response.status();
         let content_type = response.headers().get::<ContentType>().map(
             |header_ref| header_ref.clone());
 
-        // FIXME: Limit size
-        let body: Chunk = core.run(response.body().concat2())
-            .map_err(HttpClientError::generic_from)?;
+        let timeout = Timeout::new_at(timeout_time, &handle).map_err(HttpClientError::generic_from)?.and_then(|_| {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP response receiving timeout"))
+        }).map_err(|e| {
+            e.into()
+        });
+
+        let body: Chunk = match core.run(response.body().concat2().select(timeout)) {
+            Ok((body, _)) => Ok(body),
+            Err((err, _)) => Err(HttpClientError::generic_from(err)),
+        }?;
 
         let body = String::from_utf8(body.to_vec()).map_err(|e|
             format!("Got an invalid response from server: {}", e))?;
