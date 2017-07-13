@@ -158,6 +158,10 @@ impl WriteProvider for Dropbox {
         Box::new(ChunkedSha256::new(4 * 1024 * 1024))
     }
 
+    fn max_request_size(&self) -> u64 {
+        150 * 1024 * 1024
+    }
+
     fn create_directory(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct Request<'a> {

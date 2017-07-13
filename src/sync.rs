@@ -5,8 +5,13 @@ use storage::{Storage, BackupGroups, Backups};
 
 pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                     max_backup_groups: usize, encryption_passphrase: &str) -> EmptyResult {
-    // FIXME
-    let develop_mode = cfg!(debug_assertions);
+    // FIXME: Drop develop mode
+    let develop_mode = if cfg!(debug_assertions) {
+        error!("Attention! Running in develop mode.");
+        true
+    } else {
+        false
+    };
 
     let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;

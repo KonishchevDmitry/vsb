@@ -80,9 +80,8 @@ impl Storage {
         let cloud_backup_temp_path = self.get_backup_path(group_name, &backup_name, true);
         let cloud_backup_path = self.get_backup_path(group_name, &backup_name, false);
 
-        // FIXME: Stream size
         let (chunk_streams, splitter_thread) = stream_splitter::split(
-            data_stream, 10 * 1024 * 1024)?;
+            data_stream, provider.max_request_size())?;
 
         let archive_thread = match thread::Builder::new().name("backup archiving thread".into()).spawn(move || {
             archive_backup(&backup_name, &local_backup_path, encryptor)
@@ -102,7 +101,6 @@ impl Storage {
 
         let splitter_result = util::join_thread(splitter_thread);
 
-        // FIXME: Actually, no and on tar writting error we upload the broken backup
         // The real error should always be here, but...
         upload_result?;
 

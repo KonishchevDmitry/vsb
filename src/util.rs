@@ -13,7 +13,7 @@ pub fn join_thread<T>(handle: thread::JoinHandle<GenericResult<T>>) -> GenericRe
         Err(err) => {
             let error = format!("{} thread has panicked: {:?}", name, err);
             error!("{}.", error);
-            Err(From::from(error))
+            Err(error.into())
         },
     }
 }

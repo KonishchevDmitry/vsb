@@ -15,6 +15,8 @@ pub trait ReadProvider: Provider {
 
 pub trait WriteProvider: Provider {
     fn hasher(&self) -> Box<Hasher>;
+    fn max_request_size(&self) -> u64;
+
     fn create_directory(&self, path: &str) -> EmptyResult;
     fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult;
     fn delete(&self, path: &str) -> EmptyResult;
