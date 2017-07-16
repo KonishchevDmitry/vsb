@@ -43,6 +43,7 @@ impl Storage {
         let files = provider.list_directory(&self.path)?.ok_or_else(|| format!(
             "Backup root {:?} doesn't exist", self.path))?;
 
+        // FIXME: Validate backup directories: metadata.bz2 + data.tar.gz|data.tar.bz2|data.tar.7z
         for file in files {
             if file.name.starts_with('.') {
                 continue
