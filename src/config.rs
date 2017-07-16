@@ -77,7 +77,7 @@ pub fn load() -> Config {
     match load_config(&config_path) {
         Ok(config) => config,
         Err(err) => {
-            error!("Error while reading {:?} configuration file: {}", config_path, err);
+            error!("Error while reading {:?} configuration file: {}.", config_path, err);
             process::exit(1);
         }
     }
