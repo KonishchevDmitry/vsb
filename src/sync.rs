@@ -13,12 +13,10 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
         false
     };
 
-    // FIXME: Check backups for removal
-
-    let local_groups = local_storage.get_backup_groups().map_err(|e| format!(
+    let (local_groups, local_ok) = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
-    let cloud_groups = cloud_storage.get_backup_groups().map_err(|e| format!(
+    let (cloud_groups, cloud_ok) = cloud_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", cloud_storage.name(), e))?;
 
     if log_enabled!(log::LogLevel::Debug) {
@@ -37,6 +35,12 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
         }
     }
 
+    let mut ok = local_ok && cloud_ok;
+    if let Err(err) = check_backup_groups(&local_groups, &cloud_groups) {
+        error!("{}.", err);
+        ok = false;
+    }
+
     let target_groups = get_target_backup_groups(local_groups, &cloud_groups, max_backup_groups);
     let no_backups = Backups::new();
 
@@ -53,6 +57,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                 if let Err(err) = cloud_storage.create_backup_group(group_name) {
                     error!("Failed to create {:?} backup group on {}: {}.",
                            group_name, cloud_storage.name(), err);
+                    ok = false;
                     continue;
                 }
 
@@ -77,19 +82,39 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
             if let Err(err) = cloud_storage.upload_backup(
                 &backup_path, group_name, backup_name, encryption_passphrase) {
                 error!("Failed to upload {:?} backup to {}: {}.",
-                       backup_path, cloud_storage.name(), err)
+                       backup_path, cloud_storage.name(), err);
+                ok = false;
             }
         }
     }
 
     for (group_name, _) in cloud_groups.iter() {
         if develop_mode || !target_groups.contains_key(group_name) {
+            if !ok {
+                warn!("Skipping deletion of {:?} backup group from {} because of the errors above.",
+                      group_name, cloud_storage.name());
+                continue;
+            }
+
             info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
             if let Err(err) = cloud_storage.delete_backup_group(group_name) {
                 error!("Failed to delete {:?} backup backup group from {}: {}.",
                        group_name, cloud_storage.name(), err)
             }
         }
+    }
+
+    Ok(())
+}
+
+fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups) -> EmptyResult {
+    let local_groups_num = local_groups.iter().filter(
+        |&(_group_name, backups)| !backups.is_empty()).count();
+    let cloud_groups_num = cloud_groups.len();
+
+    if local_groups_num < 2 && cloud_groups_num > local_groups_num {
+        return Err!(
+            "A possible backup corruption: Cloud contains more backup groups than stored locally.")
     }
 
     Ok(())

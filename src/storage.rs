@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::thread;
 
 use regex::{self, Regex};
@@ -34,36 +34,59 @@ impl Storage {
         self.provider.read().name()
     }
 
-    pub fn get_backup_groups(&self) -> GenericResult<BackupGroups> {
+    pub fn get_backup_groups(&self) -> GenericResult<(BackupGroups, bool)> {
+        let mut ok = true;
         let backup_group_re = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$")?;
 
         let provider = self.provider.read();
         let mut backup_groups = BackupGroups::new();
 
-        let files = provider.list_directory(&self.path)?.ok_or_else(|| format!(
-            "Backup root {:?} doesn't exist", self.path))?;
+        let files = provider.list_directory(&self.path)
+            .map_err(|e| format!("Unable to list {:?} backup root on {}: {}",
+                                 &self.path, provider.name(), e))?
+            .ok_or_else(|| format!("Backup root {:?} doesn't exist", self.path))?;
 
-        // FIXME: Validate backup directories: metadata.bz2 + data.tar.gz|data.tar.bz2|data.tar.7z
         for file in files {
             if file.name.starts_with('.') {
                 continue
             }
 
-            let group_path = self.path.trim_right_matches('/').to_owned() + "/" + &file.name;
-
             match file.type_ {
-                FileType::Directory if backup_group_re.is_match(&file.name) => {
-                    backup_groups.entry(file.name.clone()).or_insert_with(Backups::new).extend(
-                        get_backups(provider, &group_path)?.iter().cloned());
-                },
+                FileType::Directory if backup_group_re.is_match(&file.name) => {},
                 _ => {
                     error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
                         self.path, provider.name(), file.type_, file.name);
+                    ok = false;
+                    continue;
                 },
             };
+
+            let group_name = &file.name;
+            let group_path = self.path.trim_right_matches('/').to_owned() + "/" + group_name;
+
+            let (backups, mut backups_ok) = get_backups(provider, &group_path).map_err(|e| format!(
+                "Unable to list {:?} backup group on {}: {}", group_path, provider.name(), e))?;
+
+            let mut backup_group = backup_groups.entry(group_name.to_owned())
+                .or_insert_with(Backups::new);
+
+            if !backups.is_empty() {
+                backup_group.extend(backups.iter().cloned());
+                let first_backup_name = backup_group.iter().next().unwrap();
+
+                if first_backup_name.split("-").next().unwrap() != group_name {
+                    error!(concat!(
+                        "Suspicious first backup ({:?}) in {:?} group on {}: ",
+                        "a possibly corrupted backup group."
+                    ), first_backup_name, group_name, provider.name());
+                    backups_ok = false;
+                }
+            }
+
+            ok &= backups_ok;
         }
 
-        Ok(backup_groups)
+        Ok((backup_groups, ok))
     }
 
     pub fn create_backup_group(&mut self, group_name: &str) -> EmptyResult {
@@ -137,8 +160,9 @@ impl Storage {
 
 const CLOUD_BACKUP_FILE_EXTENSION: &str = ".tar.gpg";
 
-fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<String>> {
+fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<String>, bool)> {
     let mut backups = Vec::new();
+    let mut ok = true;
 
     let (backup_file_type, backup_file_extension) = match provider.type_() {
         ProviderType::Local => (FileType::Directory, ""),
@@ -149,8 +173,8 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
         r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
             + &regex::escape(backup_file_extension) + "$"))?;
 
-    let files = provider.list_directory(group_path)?.ok_or_else(|| format!(
-        "Failed to list {:?} backup group: it doesn't exist", group_path))?;
+    let files = provider.list_directory(group_path)?.ok_or_else(||
+        "the backup group doesn't exist".to_owned())?;
 
     for file in files {
         if file.name.starts_with('.') {
@@ -162,13 +186,44 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<Vec<S
         if file.type_ != backup_file_type || captures.is_none() {
             error!("{:?} backup group on {} contains an unexpected {}: {:?}.",
                 group_path, provider.name(), file.type_, file.name);
+            ok = false;
             continue
+        }
+
+        if backup_file_type == FileType::Directory {
+            let backup_path = group_path.to_owned() + "/" + &file.name;
+            if let Err(err) = validate_backup(provider, &backup_path) {
+                error!("{:?} backup on {} validation error: {}", &backup_path, provider.name(), err);
+                ok = false;
+                continue
+            }
         }
 
         backups.push(captures.unwrap().get(1).unwrap().as_str().to_owned());
     }
 
-    Ok(backups)
+    Ok((backups, ok))
+}
+
+fn validate_backup(provider: &ReadProvider, backup_path: &str) -> EmptyResult {
+    let metadata_files: HashSet<String> = ["metadata.bz2"].iter().map(|&s| s.to_owned()).collect();
+    let data_files: HashSet<String> = ["data.tar.gz", "data.tar.bz2", "data.tar.7z"].iter()
+        .map(|&s| s.to_owned()).collect();
+
+    let backup_files = provider.list_directory(&backup_path)?.ok_or_else(||
+        "the backup doesn't exist".to_owned())?;
+
+    let backup_files: HashSet<String> = backup_files.iter().map(|file| file.name.clone()).collect();
+
+    if backup_files.is_disjoint(&metadata_files) {
+        return Err!("the backup is corrupted: metadata file is missing")
+    }
+
+    if backup_files.is_disjoint(&data_files) {
+        return Err!("the backup is corrupted: backup data file is missing")
+    }
+
+    Ok(())
 }
 
 fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) -> EmptyResult {
