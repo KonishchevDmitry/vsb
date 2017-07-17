@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 
 use bytes::Bytes;
 use futures::{Future, Sink};
@@ -9,6 +9,7 @@ use futures::sync::mpsc as futures_mpsc;
 use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
+use util;
 
 pub enum Data {
     Payload(Bytes),
@@ -32,9 +33,9 @@ pub type ChunkResult = Result<Chunk, hyper::Error>;
 pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)> {
     let (streams_tx, streams_rx) = mpsc::sync_channel(0);
 
-    let splitter_thread = thread::Builder::new().name("stream splitter".into()).spawn(move || {
+    let splitter_thread = util::spawn_thread("stream splitter", move || {
         Ok(splitter(data_stream, streams_tx, stream_max_size)?)
-    }).map_err(|e| format!("Unable to spawn a thread: {}", e))?;
+    })?;
 
     Ok((streams_rx, splitter_thread))
 }

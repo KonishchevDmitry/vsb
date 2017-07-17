@@ -6,12 +6,19 @@ use nix::sys;
 
 use core::{EmptyResult, GenericResult};
 
+pub fn spawn_thread<F, T>(name: &str, f: F) -> GenericResult<thread::JoinHandle<T>>
+    where F: FnOnce() -> T, F: Send + 'static, T: Send + 'static
+{
+    thread::Builder::new().name(name.to_owned()).spawn(f).map_err(|e| format!(
+        "Unable to spawn a thread: {}", e).into())
+}
+
 pub fn join_thread<T>(handle: thread::JoinHandle<GenericResult<T>>) -> GenericResult<T> {
     let name = get_thread_name(handle.thread());
     match handle.join() {
         Ok(result) => result,
         Err(err) => {
-            let error = format!("{} thread has panicked: {:?}", name, err);
+            let error = format!("{:?} thread has panicked: {:?}", name, err);
             error!("{}.", error);
             Err(error.into())
         },
@@ -21,7 +28,7 @@ pub fn join_thread<T>(handle: thread::JoinHandle<GenericResult<T>>) -> GenericRe
 pub fn join_thread_ignoring_result<T>(handle: thread::JoinHandle<T>) {
     let name = get_thread_name(handle.thread());
     if let Err(err) = handle.join() {
-        error!("{} thread has panicked: {:?}.", name, err)
+        error!("{:?} thread has panicked: {:?}.", name, err)
     }
 }
 

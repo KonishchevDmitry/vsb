@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::thread;
 
 use regex::{self, Regex};
 use tar;
@@ -41,31 +40,26 @@ impl Storage {
         let provider = self.provider.read();
         let mut backup_groups = BackupGroups::new();
 
-        let files = provider.list_directory(&self.path)
-            .map_err(|e| format!("Unable to list {:?} backup root on {}: {}",
-                                 &self.path, provider.name(), e))?
-            .ok_or_else(|| format!("Backup root {:?} doesn't exist", self.path))?;
+        let files = provider.list_directory(&self.path)?
+            .ok_or_else(|| format!("{:?} backup root doesn't exist", self.path))?;
 
         for file in files {
             if file.name.starts_with('.') {
                 continue
             }
 
-            match file.type_ {
-                FileType::Directory if backup_group_re.is_match(&file.name) => {},
-                _ => {
-                    error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
-                        self.path, provider.name(), file.type_, file.name);
-                    ok = false;
-                    continue;
-                },
-            };
+            if file.type_ != FileType::Directory || !backup_group_re.is_match(&file.name) {
+                error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
+                    self.path, provider.name(), file.type_, file.name);
+                ok = false;
+                continue;
+            }
 
             let group_name = &file.name;
             let group_path = self.path.trim_right_matches('/').to_owned() + "/" + group_name;
 
             let (backups, mut backups_ok) = get_backups(provider, &group_path).map_err(|e| format!(
-                "Unable to list {:?} backup group on {}: {}", group_path, provider.name(), e))?;
+                "Unable to list {:?} backup group: {}", group_path, e))?;
 
             let mut backup_group = backup_groups.entry(group_name.to_owned())
                 .or_insert_with(Backups::new);
@@ -107,14 +101,14 @@ impl Storage {
         let (chunk_streams, splitter_thread) = stream_splitter::split(
             data_stream, provider.max_request_size())?;
 
-        let archive_thread = match thread::Builder::new().name("backup archiving thread".into()).spawn(move || {
+        let archive_thread = match util::spawn_thread("backup archiver", move || {
             archive_backup(&backup_name, &local_backup_path, encryptor)
         }) {
             Ok(handle) => handle,
             Err(err) => {
                 util::join_thread_ignoring_result(splitter_thread);
-                return Err!("Unable to spawn a thread: {}", err);
-            },
+                return Err(err);
+            }
         };
 
         let upload_result = provider.upload_file(
@@ -145,34 +139,60 @@ impl Storage {
     }
 
     pub fn get_backup_path(&self, group_name: &str, backup_name: &str, temporary: bool) -> String {
-        let backup_file_extension = match self.provider.read().type_() {
-            ProviderType::Local => "",
-            ProviderType::Cloud => CLOUD_BACKUP_FILE_EXTENSION,
-        };
+        let extension = BackupFileTraits::get_for(self.provider.read().type_()).extension;
 
         let mut path = self.get_backup_group_path(group_name) + "/";
+
         if temporary {
             path += ".";
         }
-        path + backup_name + backup_file_extension
+
+        path + backup_name + extension
     }
 }
 
-const CLOUD_BACKUP_FILE_EXTENSION: &str = ".tar.gpg";
+pub type BackupGroups = BTreeMap<String, Backups>;
+pub type Backups = BTreeSet<String>;
+
+struct BackupFileTraits {
+    type_: FileType,
+    extension: &'static str,
+    name_re: Regex,
+}
+
+impl BackupFileTraits {
+    fn get_for(provider_type: ProviderType) -> &'static BackupFileTraits {
+        lazy_static! {
+            static ref LOCAL_TRAITS: BackupFileTraits = BackupFileTraits {
+                type_: FileType::Directory,
+                extension: "",
+                name_re: BackupFileTraits::get_name_re(""),
+            };
+
+            static ref CLOUD_TRAITS: BackupFileTraits = BackupFileTraits {
+                type_: FileType::File,
+                extension: ".tar.gpg",
+                name_re: BackupFileTraits::get_name_re(".tar.gpg"),
+            };
+        }
+
+        match provider_type {
+            ProviderType::Local => &LOCAL_TRAITS,
+            ProviderType::Cloud => &CLOUD_TRAITS,
+        }
+    }
+
+    fn get_name_re(extension: &str) -> Regex {
+        let regex = r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
+            + &regex::escape(extension) + "$";
+        Regex::new(&regex).unwrap()
+    }
+}
 
 fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<String>, bool)> {
-    let mut backups = Vec::new();
-    let mut ok = true;
+    let (mut backups, mut ok) = (Vec::new(), true);
 
-    let (backup_file_type, backup_file_extension) = match provider.type_() {
-        ProviderType::Local => (FileType::Directory, ""),
-        ProviderType::Cloud => (FileType::File, CLOUD_BACKUP_FILE_EXTENSION),
-    };
-
-    let backup_file_re: Regex = Regex::new(&(
-        r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
-            + &regex::escape(backup_file_extension) + "$"))?;
-
+    let backup_file_traits = BackupFileTraits::get_for(provider.type_());
     let files = provider.list_directory(group_path)?.ok_or_else(||
         "the backup group doesn't exist".to_owned())?;
 
@@ -181,19 +201,20 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<
             continue
         }
 
-        let captures = backup_file_re.captures(&file.name);
+        let captures = backup_file_traits.name_re.captures(&file.name);
 
-        if file.type_ != backup_file_type || captures.is_none() {
+        if file.type_ != backup_file_traits.type_ || captures.is_none() {
             error!("{:?} backup group on {} contains an unexpected {}: {:?}.",
                 group_path, provider.name(), file.type_, file.name);
             ok = false;
             continue
         }
 
-        if backup_file_type == FileType::Directory {
+        if file.type_ == FileType::Directory {
             let backup_path = group_path.to_owned() + "/" + &file.name;
             if let Err(err) = validate_backup(provider, &backup_path) {
-                error!("{:?} backup on {} validation error: {}", &backup_path, provider.name(), err);
+                error!("{:?} backup on {} validation error: {}.",
+                       &backup_path, provider.name(), err);
                 ok = false;
                 continue
             }
@@ -240,9 +261,6 @@ fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) ->
 
     archive.into_inner().unwrap().finish(None)
 }
-
-pub type BackupGroups = BTreeMap<String, Backups>;
-pub type Backups = BTreeSet<String>;
 
 // Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
 // to emulate it via this trait.

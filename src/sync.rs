@@ -5,14 +5,6 @@ use storage::{Storage, BackupGroups, Backups};
 
 pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
                     max_backup_groups: usize, encryption_passphrase: &str) -> EmptyResult {
-    // FIXME: Drop develop mode
-    let develop_mode = if cfg!(debug_assertions) {
-        error!("Attention! Running in develop mode.");
-        true
-    } else {
-        false
-    };
-
     let (local_groups, local_ok) = local_storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
 
@@ -36,10 +28,20 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
     }
 
     let mut ok = local_ok && cloud_ok;
+
     if let Err(err) = check_backup_groups(&local_groups, &cloud_groups) {
         error!("{}.", err);
         ok = false;
     }
+
+    // FIXME: Drop develop mode
+    let develop_mode = if cfg!(debug_assertions) {
+        error!("Attention! Running in develop mode.");
+        ok = false;
+        true
+    } else {
+        false
+    };
 
     let target_groups = get_target_backup_groups(local_groups, &cloud_groups, max_backup_groups);
     let no_backups = Backups::new();
@@ -89,18 +91,21 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
     }
 
     for (group_name, _) in cloud_groups.iter() {
-        if develop_mode || !target_groups.contains_key(group_name) {
-            if !ok {
-                warn!("Skipping deletion of {:?} backup group from {} because of the errors above.",
-                      group_name, cloud_storage.name());
-                continue;
-            }
+        if target_groups.contains_key(group_name) {
+            continue
+        }
 
-            info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
-            if let Err(err) = cloud_storage.delete_backup_group(group_name) {
-                error!("Failed to delete {:?} backup backup group from {}: {}.",
-                       group_name, cloud_storage.name(), err)
-            }
+        if !ok {
+            warn!("Skipping deletion of {:?} backup group from {} because of the errors above.",
+                  group_name, cloud_storage.name());
+            continue;
+        }
+
+        // FIXME: Change to info after testing
+        warn!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
+        if let Err(err) = cloud_storage.delete_backup_group(group_name) {
+            error!("Failed to delete {:?} backup backup group from {}: {}.",
+                   group_name, cloud_storage.name(), err)
         }
     }
 

@@ -23,7 +23,7 @@ impl GlobalContext {
         {
             let mut context = GLOBAL_CONTEXT.lock().unwrap();
             if context.is_some() {
-                panic!("An attempt to set a nested global context.");
+                panic!("An attempt to set a nested global context");
             }
             *context = Some(context_string);
         }

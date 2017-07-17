@@ -77,16 +77,17 @@ fn run() -> GenericResult<i32> {
     Ok(exit_code)
 }
 
-fn acquire_lock(path: &str) -> GenericResult<File> {
-    let file = File::open(path).map_err(|e| format!("Unable to open {:?}: {}", path, e))?;
+fn acquire_lock(config_path: &str) -> GenericResult<File> {
+    let file = File::open(config_path).map_err(|e| format!(
+        "Unable to open {:?}: {}", config_path, e))?;
 
     fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|e| {
         if let nix::Error::Sys(nix::Errno::EAGAIN) = e {
             format!(concat!(
                 "Unable to exclusively run the program for {:?} configuration file: ",
-                "it's already locked by another process"), path)
+                "it's already locked by another process"), config_path)
         } else {
-            format!("Unable to flock() {:?}: {}", path, e)
+            format!("Unable to flock() {:?}: {}", config_path, e)
         }
     })?;
 

@@ -5,8 +5,8 @@ use std::process;
 
 use clap::{App, Arg, AppSettings};
 use log::LogLevel;
-use shellexpand;
 use serde_yaml;
+use shellexpand;
 
 use core::GenericResult;
 use logging;

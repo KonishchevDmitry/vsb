@@ -3,7 +3,7 @@ use std::io::{self, Read, BufReader, BufRead, Write, BufWriter};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
 use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time;
 
 use nix::{fcntl, unistd};
@@ -23,10 +23,8 @@ pub struct Encryptor {
 
 impl Encryptor {
     pub fn new(encryption_passphrase: &str, hasher: Box<Hasher>) -> GenericResult<(Encryptor, DataReceiver)> {
-        debug!("Spawning a gpg process to handle data encryption...");
-
         // Buffer is for the following reasons:
-        // 1. Parallelization on successful result.
+        // 1. Parallelization.
         // 2. To not block in drop() if we get some error during dropping the object that hasn't
         //    been used yet (hasn't been written to):
         //    * One buffer slot for gpg overhead around an empty payload.
@@ -43,22 +41,25 @@ impl Encryptor {
         fcntl::fcntl(passphrase_read_fd.as_raw_fd(),
                      fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
 
+        debug!("Spawning a gpg process to handle data encryption...");
+
         let mut gpg = Command::new("gpg")
             .arg("--batch").arg("--symmetric")
             .arg("--passphrase-fd").arg(passphrase_read_fd.as_raw_fd().to_string())
             .arg("--compress-algo").arg("none")
             .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn().map_err(|e| format!("Unable to spawn a gpg process: {}", e))?;
+        drop(passphrase_read_fd);
 
         let pid = gpg.id() as i32;
         let stdin = BufWriter::new(gpg.stdin.take().unwrap());
         let encrypted_chunks_tx = tx.clone();
 
-        let stdout_reader = thread::Builder::new().name("gpg stdout reader".into()).spawn(move || {
+        let stdout_reader = util::spawn_thread("gpg stdout reader", move || {
             stdout_reader(gpg, hasher, tx)
         }).map_err(|e| {
             terminate_gpg(pid);
-            format!("Unable to spawn a thread: {}", e)
+            e
         })?;
 
         let encryptor = Encryptor {
@@ -71,6 +72,7 @@ impl Encryptor {
 
         if let Err(err) = passphrase_write_fd.write_all(encryption_passphrase.as_bytes())
             .and_then(|_| passphrase_write_fd.flush()) {
+            drop(passphrase_write_fd);
             encryptor.finish(None)?; // Try to get the real error here
             return Err!("Failed to pass encryption passphrase to gpg: {}", err);
         }
@@ -118,7 +120,7 @@ impl Encryptor {
             let _ = tx.send(message);
         }
 
-        debug!("Encryptor has closed with {:?}.", result);
+        debug!("Encryptor has been closed with {:?}.", result);
         self.result = Some(clone_empty_result(&result));
 
         result
@@ -127,28 +129,28 @@ impl Encryptor {
 
 impl Drop for Encryptor {
     fn drop(&mut self) {
-        let _ = self.close(Err!("The encryptor has dropped without finalization"));
+        let _ = self.close(Err!("The encryptor has been dropped without finalization"));
     }
 }
 
 impl io::Write for Encryptor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if let Some(ref result) = self.result {
-            return Err(io_error_from_string(result.as_ref().unwrap_err().to_string()));
+            return Err(io_error_from(result.as_ref().unwrap_err()));
         }
 
         self.stdin.as_mut().unwrap().write(buf).map_err(|e| {
-            io_error_from_string(self.close(Err(e.into())).unwrap_err().to_string())
+            io_error_from(self.close(Err(e.into())).unwrap_err())
         })
     }
 
     fn flush(&mut self) -> io::Result<()> {
         if let Some(ref result) = self.result {
-            return Err(io_error_from_string(result.as_ref().unwrap_err().to_string()));
+            return Err(io_error_from(result.as_ref().unwrap_err()));
         }
 
         self.stdin.as_mut().unwrap().flush().map_err(|e| {
-            io_error_from_string(self.close(Err(e.into())).unwrap_err().to_string())
+            io_error_from(self.close(Err(e.into())).unwrap_err())
         })
     }
 }
@@ -157,7 +159,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
     let mut stderr = gpg.stderr.take().unwrap();
 
-    let mut stderr_reader = Some(thread::Builder::new().name("gpg stderr reader".into()).spawn(move || -> EmptyResult {
+    let mut stderr_reader = Some(util::spawn_thread("gpg stderr reader", move || -> EmptyResult {
         let mut error = String::new();
 
         match stderr.read_to_string(&mut error) {
@@ -170,10 +172,10 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
             },
             Err(err) => Err!("gpg stderr reading error: {}", err),
         }
-    }).map_err(|err| format!("Unable to spawn a thread: {}", err))?);
+    })?);
 
     let checksum = read_data(stdout, hasher, tx).map_err(|err| {
-        terminate_gpg(gpg.id() as i32);
+        terminate_gpg(gpg.id() as i32); // To close gpg's stderr
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
     })?;
@@ -185,7 +187,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
         return Err!("gpg process has terminated with an error exit code");
     }
 
-    debug!("gpg process has terminated with successful exit code.");
+    debug!("gpg process has end its work with successful exit code.");
 
     Ok(checksum)
 }
@@ -200,7 +202,9 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: Da
                 return Ok(hasher.finish());
             }
 
-            hasher.write_all(encrypted_data).unwrap();
+            hasher.write_all(encrypted_data).map_err(|e| format!(
+                "Unable to hash encrypted data: {}", e))?;
+
             tx.send(Ok(Data::Payload(encrypted_data.into()))).map_err(|_|
                 "Unable to send encrypted data: the receiver has been closed".to_owned())?;
 
@@ -218,8 +222,8 @@ fn terminate_gpg(pid: i32) {
     }
 }
 
-fn io_error_from_string(error: String) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, error)
+fn io_error_from<T: ToString>(error: T) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, error.to_string())
 }
 
 fn clone_empty_result(result: &EmptyResult) -> EmptyResult {

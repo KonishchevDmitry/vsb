@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use hyper::Body;
 use hyper::header::{Authorization, Bearer, Headers};
-use serde::ser;
-use serde::de;
+use serde::{ser, de};
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
@@ -109,9 +108,13 @@ impl ReadProvider for Dropbox {
 
         loop {
             let response: Response = if let Some(ref cursor) = cursor {
-                self.api_request("/files/list_folder/continue", &ContinueRequest { cursor: &cursor })
+                self.api_request("/files/list_folder/continue", &ContinueRequest {
+                    cursor: &cursor
+                })
             } else {
-                let response = self.api_request("/files/list_folder", &Request { path: path });
+                let response = self.api_request("/files/list_folder", &Request {
+                    path: path
+                });
 
                 if let Err(HttpClientError::Api(ref e)) = response {
                     if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {
@@ -220,7 +223,7 @@ impl WriteProvider for Dropbox {
             match result {
                 Ok(ChunkStream::Stream(offset, chunk_stream)) => {
                     let _: Option<EmptyResponse> = self.content_request(
-                        "/files/upload_session/append_v2", &AppendRequest{
+                        "/files/upload_session/append_v2", &AppendRequest {
                             cursor: Cursor {
                                 session_id: &start_response.session_id,
                                 offset: offset,
@@ -229,7 +232,7 @@ impl WriteProvider for Dropbox {
                 },
                 Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
                     let finish_response: FinishResponse = self.content_request(
-                        "/files/upload_session/finish", &FinishRequest{
+                        "/files/upload_session/finish", &FinishRequest {
                             cursor: Cursor {
                                 session_id: &start_response.session_id,
                                 offset: size,
@@ -242,7 +245,7 @@ impl WriteProvider for Dropbox {
 
                     if finish_response.content_hash != checksum {
                         if let Err(err) = self.delete(temp_path) {
-                            warn!("Failed to delete a temporary {:?} file from {}: {}.",
+                            error!("Failed to delete a temporary {:?} file from {}: {}.",
                                 temp_path, self.name(), err);
                         }
                         return Err("Checksum mismatch".into());
@@ -250,13 +253,11 @@ impl WriteProvider for Dropbox {
 
                     return self.rename_file(temp_path, path);
                 }
-                Err(err) => {
-                    return Err(err.into());
-                },
+                Err(err) => return Err(err.into()),
             }
         }
 
-        Err!("A logical error has occurred")
+        Err!("Chunk stream sender has been closed without a termination message")
     }
 
     fn delete(&self, path: &str) -> EmptyResult {
