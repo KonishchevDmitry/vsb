@@ -1,17 +1,21 @@
+use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf, Component};
 use std::process;
+use std::time::Duration;
 
 use clap::{App, Arg, AppSettings};
 use log::LogLevel;
+use regex::Regex;
+use serde::de::{self, Deserializer, Visitor};
 use serde_yaml;
 use shellexpand;
 
 use core::GenericResult;
 use logging;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
@@ -19,7 +23,7 @@ pub struct Config {
     pub backups: Vec<Backup>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Backup {
     pub name: String,
@@ -28,9 +32,12 @@ pub struct Backup {
     pub provider: Provider,
     pub max_backup_groups: usize,
     pub encryption_passphrase: String,
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub max_time_without_backups: Option<Duration>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "name")]
 pub enum Provider {
     #[serde(rename = "dropbox")]
@@ -133,4 +140,47 @@ fn validate_path(path: &str) -> GenericResult<String> {
     }
 
     Ok(normalized_path.to_str().unwrap().to_owned())
+}
+
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+    where D: Deserializer<'de>
+{
+    deserializer.deserialize_string(DurationVisitor)
+}
+
+struct DurationVisitor;
+
+impl<'de> Visitor<'de> for DurationVisitor {
+    type Value = Option<Duration>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("time duration in $number{m|h|d} format")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> where E: de::Error {
+        match parse_duration(v) {
+            Ok(duration) => Ok(Some(duration)),
+            Err(err) => Err(E::custom(err))
+        }
+    }
+}
+
+fn parse_duration(string: &str) -> GenericResult<Duration> {
+    lazy_static! {
+        static ref DURATION_RE: Regex = Regex::new(
+            r"^(?P<number>[1-9]\d*)(?P<unit>[mhd])$").unwrap();
+    }
+
+    let captures = DURATION_RE.captures(string).ok_or(format!(
+        "Invalid time duration specification: {:?}", string))?;
+
+    let mut duration = captures.name("number").unwrap().as_str().parse().unwrap();
+    duration *= match captures.name("unit").unwrap().as_str() {
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 60 * 60 * 24,
+        _ => unreachable!(),
+    };
+
+    Ok(Duration::from_secs(duration))
 }
