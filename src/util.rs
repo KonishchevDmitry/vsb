@@ -35,10 +35,7 @@ pub fn join_thread_ignoring_result<T>(handle: thread::JoinHandle<T>) {
 fn get_thread_name(thread: &thread::Thread) -> String {
     match thread.name() {
         Some(name) => name.to_owned(),
-        None => {
-            // FIXME: handle.thread().id() is stable since Rust 1.19
-            format!("{:?}", 0)
-        }
+        None => format!("{:?}", thread.id()),
     }
 }
 
