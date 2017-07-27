@@ -1,35 +1,10 @@
-use log;
-
 use core::EmptyResult;
 use storage::{Storage, BackupGroups, Backups};
 
-pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
-                    max_backup_groups: usize, encryption_passphrase: &str) -> EmptyResult {
-    let (local_groups, local_ok) = local_storage.get_backup_groups().map_err(|e| format!(
-        "Failed to list backup groups on {}: {}", local_storage.name(), e))?;
-
-    let (cloud_groups, cloud_ok) = cloud_storage.get_backup_groups().map_err(|e| format!(
-        "Failed to list backup groups on {}: {}", cloud_storage.name(), e))?;
-
-    if log_enabled!(log::LogLevel::Debug) {
-        for &(storage, groups) in &[
-            (local_storage, &local_groups),
-            (cloud_storage, &cloud_groups)
-        ] {
-            if groups.is_empty() {
-                debug!("There are no backup groups on {}.", storage.name());
-            } else {
-                debug!("Backup groups on {}:", storage.name());
-                for (group_name, backups) in groups.iter() {
-                    debug!("{}: {}", group_name, backups.iter().cloned().collect::<Vec<String>>().join(", "));
-                }
-            }
-        }
-    }
-
-    let mut ok = local_ok && cloud_ok;
-
-    if let Err(err) = check_backup_groups(&local_groups, &cloud_groups) {
+pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
+                    cloud_storage: &mut Storage, cloud_groups: &BackupGroups,
+                    mut ok: bool, max_backup_groups: usize, encryption_passphrase: &str) -> bool {
+    if let Err(err) = check_backup_groups(local_groups, cloud_groups) {
         error!("{}.", err);
         ok = false;
     }
@@ -43,7 +18,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
         false
     };
 
-    let target_groups = get_target_backup_groups(local_groups, &cloud_groups, max_backup_groups);
+    let target_groups = get_target_backup_groups(local_groups, cloud_groups, max_backup_groups);
     let no_backups = Backups::new();
 
     for (group_name, target_backups) in target_groups.iter() {
@@ -109,7 +84,7 @@ pub fn sync_backups(local_storage: &Storage, cloud_storage: &mut Storage,
         }
     }
 
-    Ok(())
+    ok
 }
 
 fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups) -> EmptyResult {
@@ -122,11 +97,13 @@ fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups)
             "A possible backup corruption: Cloud contains more backup groups than stored locally.")
     }
 
+    // FIXME: Check local backup consistency by reading metadata
+
     Ok(())
 }
 
-fn get_target_backup_groups(local_groups: BackupGroups, cloud_groups: &BackupGroups, max_groups: usize) -> BackupGroups {
-    let mut target_groups = local_groups;
+fn get_target_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups, max_groups: usize) -> BackupGroups {
+    let mut target_groups = local_groups.clone();
 
     for (group_name, backups) in cloud_groups.iter() {
         target_groups.entry(group_name.clone()).or_insert_with(Backups::new).extend(

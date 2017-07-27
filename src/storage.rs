@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::time::SystemTime;
 
 use regex::{self, Regex};
 use tar;
 
+use chrono::{self, TimeZone};
 use core::{EmptyResult, GenericResult};
 use encryptor::Encryptor;
 use provider::{ProviderType, ReadProvider, WriteProvider, FileType};
@@ -88,6 +90,7 @@ impl Storage {
         self.provider.write()?.create_directory(&group_path)
     }
 
+    // FIXME: Do we have to split big files?
     pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
         let provider = self.provider.write()?;
@@ -148,6 +151,13 @@ impl Storage {
         }
 
         path + backup_name + extension
+    }
+
+    pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
+        let backup_time = chrono::offset::Local.datetime_from_str(&backup_name, "%Y.%m.%d-%H:%M:%S")
+            .map_err(|_| format!("Invalid backup name: {:?}", backup_name))?;
+
+        Ok(SystemTime::from(backup_time))
     }
 }
 

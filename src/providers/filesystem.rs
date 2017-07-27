@@ -15,7 +15,7 @@ impl Filesystem {
 
 impl Provider for Filesystem {
     fn name(&self) -> &'static str {
-        "filesystem"
+        "Local storage"
     }
 
     fn type_(&self) -> ProviderType {
