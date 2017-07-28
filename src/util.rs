@@ -1,8 +1,9 @@
 use std::thread;
 use std::time::{self, Duration};
 
-use nix::errno;
-use nix::sys;
+use libc::pid_t;
+use nix::{Errno, sys, unistd};
+use nix::Error::Sys;
 
 use core::{EmptyResult, GenericResult};
 
@@ -39,9 +40,10 @@ fn get_thread_name(thread: &thread::Thread) -> String {
     }
 }
 
-pub fn terminate_process(name: &str, pid: i32, timeout: Duration) -> EmptyResult {
+pub fn terminate_process(name: &str, pid: pid_t, timeout: Duration) -> EmptyResult {
     debug!("Terminating {}...", name);
 
+    let pid = unistd::Pid::from_raw(pid);
     let mut signal = sys::signal::SIGTERM;
     let start_time = time::Instant::now();
 
@@ -55,22 +57,14 @@ pub fn terminate_process(name: &str, pid: i32, timeout: Duration) -> EmptyResult
 
                 match sys::wait::waitpid(pid, Some(sys::wait::WNOHANG)) {
                     Ok(_) => break,
-                    Err(err) => {
-                        if err.errno() != errno::ECHILD {
-                            return Err!("Failed to wait() {}: {}", name, err);
-                        }
-                    },
+                    Err(Sys(errno)) if errno == Errno::ECHILD => (),
+                    Err(err) => return Err!("Failed to wait() {}: {}", name, err),
                 };
 
                 thread::sleep(Duration::from_millis(100));
             },
-            Err(err) => {
-                if err.errno() == errno::ESRCH {
-                    break;
-                } else {
-                    return Err!("Failed to terminate {}: {}", name, err);
-                }
-            },
+            Err(Sys(errno)) if errno == Errno::ESRCH => break,
+            Err(err) => return Err!("Failed to terminate {}: {}", name, err),
         }
     }
 

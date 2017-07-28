@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time;
 
+use libc::pid_t;
 use nix::{fcntl, unistd};
 
 use core::{EmptyResult, GenericResult};
@@ -14,7 +15,7 @@ use stream_splitter::{DataSender, DataReceiver, Data};
 use util;
 
 pub struct Encryptor {
-    pid: i32,
+    pid: pid_t,
     stdin: Option<BufWriter<ChildStdin>>,
     stdout_reader: Option<JoinHandle<GenericResult<String>>>,
     encrypted_data_tx: Option<DataSender>,
@@ -51,7 +52,7 @@ impl Encryptor {
             .spawn().map_err(|e| format!("Unable to spawn a gpg process: {}", e))?;
         drop(passphrase_read_fd);
 
-        let pid = gpg.id() as i32;
+        let pid = gpg.id() as pid_t;
         let stdin = BufWriter::new(gpg.stdin.take().unwrap());
         let encrypted_chunks_tx = tx.clone();
 
@@ -215,7 +216,7 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: Da
     }
 }
 
-fn terminate_gpg(pid: i32) {
+fn terminate_gpg(pid: pid_t) {
     let termination_timeout = time::Duration::from_secs(3);
     if let Err(err) = util::terminate_process("a child gpg process", pid, termination_timeout) {
         error!("{}.", err)
