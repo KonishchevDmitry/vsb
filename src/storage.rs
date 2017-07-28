@@ -205,10 +205,11 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<
     let (mut backups, mut ok) = (Vec::new(), true);
 
     let backup_file_traits = BackupFileTraits::get_for(provider.type_());
-    let files = provider.list_directory(group_path)?.ok_or_else(||
+    let mut files = provider.list_directory(group_path)?.ok_or_else(||
         "the backup group doesn't exist".to_owned())?;
 
     let mut available_checksums = HashSet::new();
+    files.sort_by(|a, b| a.name.cmp(&b.name));
 
     for file in files {
         if file.name.starts_with('.') {
