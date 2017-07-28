@@ -7,6 +7,7 @@ authors = ["Dmitry Konishchev"]
 ansi_term = "*"
 atty = "*"
 bytes = "*"
+bzip2 = "*"
 chrono = "*"
 clap = "*"
 fern = "*"

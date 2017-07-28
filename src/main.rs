@@ -1,6 +1,7 @@
 extern crate ansi_term;
 extern crate atty;
 extern crate bytes;
+extern crate bzip2;
 extern crate chrono;
 extern crate clap;
 extern crate fern;
@@ -66,12 +67,9 @@ fn run() -> GenericResult<i32> {
     for backup in config.backups.iter() {
         let _context = GlobalContext::new(&backup.name);
 
-        info!("Syncing...");
         if let Err(err) = sync_backups(backup) {
             error!("Sync failed: {}.", err);
             exit_code = 1;
-        } else {
-            info!("Sync completed.")
         }
     }
 
@@ -107,6 +105,7 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
     };
     let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage)?;
 
+    info!("Syncing...");
     let sync_ok = sync::sync_backups(
         &local_storage, &local_backup_groups,
         &mut cloud_storage, &cloud_backup_groups, local_ok && cloud_ok,
@@ -126,6 +125,7 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
 }
 
 fn get_backup_groups(storage: &Storage) -> GenericResult<(BackupGroups, bool)> {
+    info!("Checking backups on {}...", storage.name());
     let (backup_groups, ok) = storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", storage.name(), e))?;
 

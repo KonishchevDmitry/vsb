@@ -1,4 +1,5 @@
 use std::fmt;
+use std::io;
 
 use core::{GenericResult, EmptyResult};
 use hash::Hasher;
@@ -11,6 +12,10 @@ pub trait Provider {
 
 pub trait ReadProvider: Provider {
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>>;
+
+    fn open_file(&self, _path: &str) -> GenericResult<Box<io::Read>> {
+        Err!("{} provider doesn't support file opening functionality", self.name())
+    }
 }
 
 pub trait WriteProvider: Provider {

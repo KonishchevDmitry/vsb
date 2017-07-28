@@ -58,4 +58,8 @@ impl ReadProvider for Filesystem {
 
         Ok(Some(files))
     }
+
+    fn open_file(&self, path: &str) -> GenericResult<Box<io::Read>> {
+        Ok(Box::new(fs::File::open(path)?))
+    }
 }

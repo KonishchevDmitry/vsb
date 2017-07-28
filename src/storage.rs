@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::io::{BufRead, BufReader};
 use std::time::SystemTime;
 
+use bzip2::read::BzDecoder;
 use regex::{self, Regex};
 use tar;
 
@@ -206,6 +208,8 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<
     let files = provider.list_directory(group_path)?.ok_or_else(||
         "the backup group doesn't exist".to_owned())?;
 
+    let mut available_checksums = HashSet::new();
+
     for file in files {
         if file.name.starts_with('.') {
             continue
@@ -220,24 +224,32 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<
             continue
         }
 
+        let backup_name = captures.unwrap().get(1).unwrap().as_str().to_owned();
+
         if file.type_ == FileType::Directory {
             let backup_path = group_path.to_owned() + "/" + &file.name;
-            if let Err(err) = validate_backup(provider, &backup_path) {
-                error!("{:?} backup on {} validation error: {}.",
-                       &backup_path, provider.name(), err);
-                ok = false;
-                continue
-            }
+
+            match validate_backup(provider, &mut available_checksums, &backup_name, &backup_path) {
+                Ok(recoverable) => ok = ok && recoverable,
+                Err(err) => {
+                    error!("{:?} backup on {} validation error: {}.",
+                           &backup_path, provider.name(), err);
+                    ok = false;
+                    continue
+                }
+            };
         }
 
-        backups.push(captures.unwrap().get(1).unwrap().as_str().to_owned());
+        backups.push(backup_name);
     }
 
     Ok((backups, ok))
 }
 
-fn validate_backup(provider: &ReadProvider, backup_path: &str) -> EmptyResult {
-    let metadata_files: HashSet<String> = ["metadata.bz2"].iter().map(|&s| s.to_owned()).collect();
+fn validate_backup(provider: &ReadProvider, available_checksums: &mut HashSet<String>,
+                   backup_name: &str, backup_path: &str) -> GenericResult<bool> {
+    let metadata_name = "metadata.bz2";
+    let metadata_files: HashSet<String> = [metadata_name].iter().map(|&s| s.to_owned()).collect();
     let data_files: HashSet<String> = ["data.tar.gz", "data.tar.bz2", "data.tar.7z"].iter()
         .map(|&s| s.to_owned()).collect();
 
@@ -254,7 +266,56 @@ fn validate_backup(provider: &ReadProvider, backup_path: &str) -> EmptyResult {
         return Err!("the backup is corrupted: backup data file is missing")
     }
 
-    Ok(())
+    Ok(match provider.type_() {
+        ProviderType::Local => {
+            let metadata_path = backup_path.to_owned() + "/" + metadata_name;
+            check_backup_consistency(provider, available_checksums, backup_name, &metadata_path)?
+        },
+        ProviderType::Cloud => true,
+    })
+}
+
+fn check_backup_consistency(provider: &ReadProvider, available_checksums: &mut HashSet<String>,
+                            backup_name: &str, metadata_path: &str) -> GenericResult<bool> {
+    let metadata_file = provider.open_file(metadata_path).map(BzDecoder::new).map(BufReader::new)
+        .map_err(|e| format!("Unable to open metadata file: {}", e))?;
+
+    let mut files = 0;
+
+    for line in metadata_file.lines() {
+        let line = line.map_err(|e| format!("Error while reading metadata file: {}", e))?;
+        files += 1;
+
+        let mut parts = line.splitn(4, " ");
+        let checksum = parts.next();
+        let status = parts.next();
+        let fingerprint = parts.next();
+        let filename = parts.next();
+
+        let (checksum, unique, filename) = match (checksum, status, fingerprint, filename) {
+            (Some(checksum), Some(status), Some(_), Some(filename))
+                if status == "extern" || status == "unique" =>
+                    (checksum.to_owned(), status == "unique", filename),
+            _ => return Err!("Error while reading metadata file: it has an unsupported format"),
+        };
+
+        if unique {
+            available_checksums.insert(checksum);
+        } else if !available_checksums.contains(&checksum) {
+            error!(concat!(
+                "{:?} backup on {} is not recoverable: ",
+                "unable to find extern {:?} file in the backup group."),
+                   backup_name, provider.name(), filename);
+            return Ok(false)
+        }
+    }
+
+    if files == 0 {
+        error!("{:?} backup on {} don't have any files.", backup_name, provider.name());
+        return Ok(false)
+    }
+
+    Ok(true)
 }
 
 fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) -> EmptyResult {

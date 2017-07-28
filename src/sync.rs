@@ -97,8 +97,6 @@ fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups)
             "A possible backup corruption: Cloud contains more backup groups than stored locally.")
     }
 
-    // FIXME: Check local backup consistency by reading metadata
-
     Ok(())
 }
 
