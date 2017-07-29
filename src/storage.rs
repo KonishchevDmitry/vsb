@@ -92,7 +92,6 @@ impl Storage {
         self.provider.write()?.create_directory(&group_path)
     }
 
-    // FIXME: Do we have to split big files?
     pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
         let provider = self.provider.write()?;
