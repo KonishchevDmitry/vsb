@@ -278,6 +278,11 @@ fn validate_backup(provider: &ReadProvider, available_checksums: &mut HashSet<St
 
 fn check_backup_consistency(provider: &ReadProvider, available_checksums: &mut HashSet<String>,
                             backup_name: &str, metadata_path: &str) -> GenericResult<bool> {
+    // FIXME: Drop develop mode
+    if cfg!(debug_assertions) {
+        return Ok(false);
+    }
+
     let metadata_file = provider.open_file(metadata_path).map(BzDecoder::new).map(BufReader::new)
         .map_err(|e| format!("Unable to open metadata file: {}", e))?;
 
