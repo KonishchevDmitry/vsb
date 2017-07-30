@@ -10,7 +10,7 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, EmptyResponse, HttpClientError};
+use http_client::{HttpClient, Method, Request, EmptyResponse, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -33,6 +33,8 @@ struct AccessToken {
     expire_time: Instant,
 }
 
+type ApiResult<T> = Result<T, HttpClientError<ApiError>>;
+
 impl GoogleDrive {
     pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GenericResult<GoogleDrive> {
         Ok(GoogleDrive {
@@ -41,20 +43,121 @@ impl GoogleDrive {
             refresh_token: refresh_token.to_owned(),
             access_token: RefCell::new(None),
 
-            // FIXME
-            client: HttpClient::new()?
-                .with_default_header(Authorization(Bearer {token: refresh_token.to_owned()}))
+            client: HttpClient::new()?,
         })
     }
 
-    fn access_token(&self) -> Result<String, HttpClientError<ApiError>> {
+    fn list_directory_by_id(&self, id: &str) -> GenericResult<Option<Vec<File>>> {
+        // FIXME
+        #[derive(Serialize)]
+        struct RequestParams<'a> {
+            q: &'a str,
+            pageSize: i32,
+        }
+
+        // FIXME
+        #[derive(Serialize)]
+        struct ContinueRequestParams<'a> {
+            q: &'a str,
+            #[serde(rename = "pageToken")]
+            page_token: &'a str,
+            pageSize: i32,
+        }
+
+        #[derive(Deserialize)]
+        struct Response {
+            files: Vec<Entry>,
+            #[serde(rename = "incompleteSearch")]
+            incomplete_search: bool,
+            #[serde(rename = "nextPageToken")]
+            next_page_token: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct Entry {
+            id: String,
+            name: String,
+            #[serde(rename = "mimeType")]
+            mime_type: String,
+        }
+
+        let mut page_token: Option<String> = None;
+        let (mut page, page_limit) = (1, 1000);
+        let mut files = Vec::new();
+
+        loop {
+            let response: Response = if let Some(ref page_token) = page_token {
+                let request = self.api_request(Method::Get, "/files")?.with_params(&ContinueRequestParams {
+                    q: "'root' in parents and trashed = false",
+                    page_token: page_token,
+                    pageSize: 3,
+                })?;
+
+                self.client.request(request)
+            } else {
+                // FIXME: id
+
+                let request = self.api_request(Method::Get, "/files")?.with_params(&RequestParams {
+                    q: "'root' in parents and trashed = false",
+                    pageSize: 3,
+                })?;
+                // FIXME: infer
+                let response: ApiResult<Response> = self.client.request(request);
+
+                // FIXME
+//                if let Err(HttpClientError::Api(ref e)) = response {
+//                    if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {
+//                        if let Some(ref e) = e.error.path {
+//                            if e.tag == "not_found" {
+//                                return Ok(None);
+//                            }
+//                        }
+//                    }
+//                }
+
+                response
+            }?;
+
+            if response.incomplete_search {
+                return Err!("Got an incomplete result on directory listing")
+            }
+
+            for ref file in response.files {
+                files.push(File {
+                    name: file.name.clone(),
+                    type_: if file.mime_type == "application/vnd.google-apps.folder" {
+                        FileType::Directory
+                    } else if file.mime_type.starts_with("application/vnd.google-apps.") {
+                        FileType::Other
+                    } else {
+                        FileType::File
+                    },
+                });
+            }
+
+            if let Some(next_page_token) = response.next_page_token {
+                if page >= page_limit {
+                    return Err!("Directory listing page limit has exceeded");
+                }
+
+                page_token = Some(next_page_token);
+                page += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(Some(files))
+    }
+
+    fn access_token(&self) -> ApiResult<String> {
         let mut access_token = self.access_token.borrow_mut();
 
         if let Some(ref access_token) = *access_token {
             let now = Instant::now();
 
-            if access_token.expire_time < now &&
-                now.duration_since(access_token.expire_time) > Duration::from_secs(1) // FIXME: Request timeout here?
+            if access_token.expire_time > now &&
+                access_token.expire_time.duration_since(now) > Duration::from_secs(1) // FIXME: Request timeout here?
             {
                 return Ok(access_token.token.to_owned());
             }
@@ -101,14 +204,9 @@ impl GoogleDrive {
         return self.client.form_request(&url, request, Duration::from_secs(5));
     }
 
-    // FIXME
-    fn api_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<ApiError>>
-        where I: ser::Serialize,
-              O: de::DeserializeOwned,
-    {
-        self.access_token().unwrap();
-        let url = API_ENDPOINT.to_owned() + path;
-        return self.client.json_request(&url, request, Duration::from_secs(15));
+    fn api_request(&self, method: Method, path: &str) -> ApiResult<Request> {
+        Ok(Request::new(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
+            .with_header(Authorization(Bearer {token: self.access_token()?})))
     }
 
     // FIXME
@@ -140,81 +238,7 @@ impl Provider for GoogleDrive {
 impl ReadProvider for GoogleDrive {
     // FIXME
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
-        #[derive(Serialize)]
-        struct Request<'a> {
-            path: &'a str,
-        }
-
-        #[derive(Serialize)]
-        struct ContinueRequest<'a> {
-            cursor: &'a str,
-        }
-
-        #[derive(Deserialize)]
-        struct Response {
-            entries: Vec<Entry>,
-            cursor: String,
-            has_more: bool,
-        }
-
-        #[derive(Deserialize)]
-        struct Entry {
-            #[serde(rename = ".tag")]
-            tag: String,
-            name: String,
-        }
-
-        let mut cursor: Option<String> = None;
-        let (mut page, page_limit) = (1, 1000);
-        let mut files = Vec::new();
-
-        loop {
-            let response: Response = if let Some(ref cursor) = cursor {
-                self.api_request("/files/list_folder/continue", &ContinueRequest {
-                    cursor: &cursor
-                })
-            } else {
-                let response = self.api_request("/files/list_folder", &Request {
-                    path: path
-                });
-
-                if let Err(HttpClientError::Api(ref e)) = response {
-                    if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {
-                        if let Some(ref e) = e.error.path {
-                            if e.tag == "not_found" {
-                                return Ok(None);
-                            }
-                        }
-                    }
-                }
-
-                response
-            }?;
-
-            for ref entry in &response.entries {
-                files.push(File {
-                    name: entry.name.clone(),
-                    type_: match entry.tag.as_str() {
-                        "folder" => FileType::Directory,
-                        "file" => FileType::File,
-                        _ => FileType::Other,
-                    },
-                })
-            }
-
-            if !response.has_more {
-                break;
-            }
-
-            if page >= page_limit {
-                return Err!("Directory listing page limit has exceeded");
-            }
-
-            cursor = Some(response.cursor);
-            page += 1;
-        }
-
-        Ok(Some(files))
+        self.list_directory_by_id(path)
     }
 }
 
@@ -236,7 +260,7 @@ impl WriteProvider for GoogleDrive {
             path: &'a str,
         }
 
-        let _: EmptyResponse = self.api_request("/files/create_folder_v2", &Request {
+        let _: EmptyResponse = self.oauth_request("/files/create_folder_v2", &Request {
             path: path
         })?;
 
@@ -333,7 +357,7 @@ impl WriteProvider for GoogleDrive {
             path: &'a str,
         }
 
-        let _: EmptyResponse = self.api_request("/files/delete_v2", &Request {
+        let _: EmptyResponse = self.oauth_request("/files/delete_v2", &Request {
             path: path
         })?;
 

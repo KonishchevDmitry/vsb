@@ -3,19 +3,20 @@ use std::fmt;
 use std::io;
 use std::time::{Instant, Duration};
 
-use core::GenericResult;
-
 use futures::{Future, Stream};
-use hyper::{self, Client, Method, Request, Headers, Response, StatusCode, Chunk};
+use hyper::{self, Client, Headers, Body, Response, StatusCode, Chunk};
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
-use hyper::Body;
 use hyper_tls::HttpsConnector;
+use log::LogLevel;
 use mime;
 use serde::{ser, de};
 use serde_json;
 use serde_urlencoded;
 use tokio_core::reactor::{Core, Timeout};
 
+pub use hyper::Method;
+
+use core::GenericResult;
 
 pub struct HttpClient {
     default_headers: Headers,
@@ -52,20 +53,15 @@ impl HttpClient {
         self.process_request(method, url, headers, body, timeout)
     }
 
-    pub fn json_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
+    // FIXME: deprecate
+    pub fn json_request<I, O, E>(&self, method: Method, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let method = Method::Post;
-        let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
-        trace!("Sending {method} {url} {request}...", method=method, url=url, request=request_json);
-
-        let mut headers = self.default_headers.clone();
-        headers.set(ContentType::json());
-        headers.set(ContentLength(request_json.len() as u64));
-
-        self.process_request(method, url, headers, request_json, timeout)
+        let request = Request::new(method, url.to_owned(), timeout).with_json(request)
+            .map_err(HttpClientError::generic_from)?;
+        self.request(request)
     }
 
     pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
@@ -90,6 +86,29 @@ impl HttpClient {
         self.process_request(method, url, request_headers, body, timeout)
     }
 
+    // FIXME: Deprecate all specialized methods
+    pub fn request<O, E>(&self, request: Request) -> Result<O, HttpClientError<E>>
+        where O: de::DeserializeOwned,
+              E: de::DeserializeOwned + Error,
+    {
+        if log_enabled!(LogLevel::Trace) {
+            let mut extra_info = String::new();
+
+            if let Some(body) = request.trace_body {
+                extra_info += " ";
+                extra_info += &body;
+            }
+
+            trace!("Sending {method} {url}{extra_info}...",
+                   method=request.method, url=request.url, extra_info=extra_info);
+        }
+
+        let mut headers = self.default_headers.clone();
+        headers.extend(request.headers.iter());
+
+        self.process_request(request.method, &request.url, headers, request.body, request.timeout)
+    }
+
     fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
                                 timeout: Duration
     ) -> Result<O, HttpClientError<E>>
@@ -99,7 +118,7 @@ impl HttpClient {
     {
         let url = url.parse().map_err(HttpClientError::generic_from)?;
 
-        let mut http_request = Request::new(method, url);
+        let mut http_request = hyper::Request::new(method, url);
         *http_request.headers_mut() = headers;
         http_request.set_body(body);
 
@@ -158,6 +177,87 @@ impl HttpClient {
 
         Ok(serde_json::from_str(&body).map_err(|e|
             format!("Got an invalid response from server: {}", e))?)
+    }
+}
+
+pub struct Request {
+    method: Method,
+    url: String,
+    headers: Headers,
+    body: Option<Body>,
+    timeout: Duration,
+
+    trace_body: Option<String>,
+}
+
+impl Request {
+    pub fn new(method: Method, url: String, timeout: Duration) -> Request {
+        Request {
+            method: method,
+            url: url.to_owned(),
+            headers: Headers::new(),
+            body: None,
+            timeout: timeout,
+
+            trace_body: None,
+        }
+    }
+
+    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request> {
+        let query_string = serde_urlencoded::to_string(params)?;
+
+        self.url += if self.url.contains('?') {
+            "&"
+        } else {
+            "?"
+        };
+
+        self.url += &query_string;
+
+        Ok(self)
+    }
+
+    pub fn with_header<H: Header>(mut self, header: H) -> Request {
+        self.headers.set(header);
+        self
+    }
+
+    pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
+                                    body: B) -> GenericResult<Request> {
+        if self.body.is_some() {
+            return Err!("An attempt to set request body twice")
+        }
+
+        self.headers.set(content_type);
+        if let Some(content_length) = content_length {
+            self.headers.set(ContentLength(content_length));
+        }
+
+        self.body = Some(body.into());
+
+        Ok(self)
+    }
+
+    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request> {
+        let content_length = Some(body.len() as u64);
+
+        if log_enabled!(LogLevel::Trace) {
+            let mut request = self.with_body(content_type, content_length, body.clone())?;
+            request.trace_body = Some(body);
+            return Ok(request);
+        } else {
+            return Ok(self.with_body(content_type, content_length, body)?);
+        }
+    }
+
+    pub fn with_form<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request> {
+        let body = serde_urlencoded::to_string(request)?;
+        Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
+    }
+
+    pub fn with_json<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request> {
+        let body = serde_json::to_string(request)?;
+        Ok(self.with_text_body(ContentType::json(), body)?)
     }
 }
 

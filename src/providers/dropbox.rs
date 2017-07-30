@@ -9,7 +9,7 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, EmptyResponse, HttpClientError};
+use http_client::{HttpClient, Method, EmptyResponse, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -48,7 +48,7 @@ impl Dropbox {
               O: de::DeserializeOwned,
     {
         let url = API_ENDPOINT.to_owned() + path;
-        return self.client.json_request(&url, request, Duration::from_secs(15));
+        return self.client.json_request(Method::Post, &url, request, Duration::from_secs(15));
     }
 
     fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<ApiError>>
@@ -129,7 +129,7 @@ impl ReadProvider for Dropbox {
                 response
             }?;
 
-            for ref entry in &response.entries {
+            for ref entry in response.entries {
                 files.push(File {
                     name: entry.name.clone(),
                     type_: match entry.tag.as_str() {
@@ -137,7 +137,7 @@ impl ReadProvider for Dropbox {
                         "file" => FileType::File,
                         _ => FileType::Other,
                     },
-                })
+                });
             }
 
             if !response.has_more {
