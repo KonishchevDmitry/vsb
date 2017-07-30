@@ -17,6 +17,7 @@ extern crate regex;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
+extern crate serde_urlencoded;
 extern crate serde_yaml;
 extern crate sha2;
 extern crate shellexpand;
@@ -47,6 +48,7 @@ use core::{EmptyResult, GenericResult};
 use logging::GlobalContext;
 use providers::dropbox::Dropbox;
 use providers::filesystem::Filesystem;
+use providers::google_drive::GoogleDrive;
 use storage::{Storage, BackupGroups};
 
 fn main() {
@@ -101,8 +103,10 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
                          local_ok, backup_config.max_time_without_backups);
 
     let mut cloud_storage = match backup_config.provider {
-        config::Provider::Dropbox {ref access_token} => Storage::new(
-            Dropbox::new(&access_token)?, &backup_config.dst)
+        config::Provider::Dropbox {ref access_token} =>
+            Storage::new(Dropbox::new(&access_token)?, &backup_config.dst),
+        config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
+            Storage::new(GoogleDrive::new(&client_id, &client_secret, &refresh_token)?, &backup_config.dst),
     };
     let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage)?;
 

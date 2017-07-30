@@ -41,7 +41,16 @@ pub struct Backup {
 #[serde(tag = "name")]
 pub enum Provider {
     #[serde(rename = "dropbox")]
-    Dropbox {access_token: String},
+    Dropbox {
+        access_token: String
+    },
+
+    #[serde(rename = "google_drive")]
+    GoogleDrive {
+        client_id: String,
+        client_secret: String,
+        refresh_token: String,
+    },
 }
 
 pub fn load() -> Config {

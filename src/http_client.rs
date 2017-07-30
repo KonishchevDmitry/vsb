@@ -13,6 +13,7 @@ use hyper_tls::HttpsConnector;
 use mime;
 use serde::{ser, de};
 use serde_json;
+use serde_urlencoded;
 use tokio_core::reactor::{Core, Timeout};
 
 
@@ -35,6 +36,22 @@ impl HttpClient {
         self
     }
 
+    pub fn form_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
+        where I: ser::Serialize,
+              O: de::DeserializeOwned,
+              E: de::DeserializeOwned + Error,
+    {
+        let method = Method::Post;
+        let body = serde_urlencoded::to_string(request).map_err(HttpClientError::generic_from)?;
+        trace!("Sending {method} {url} {body}...", method=method, url=url, body=body);
+
+        let mut headers = self.default_headers.clone();
+        headers.set(ContentType::form_url_encoded());
+        headers.set(ContentLength(body.len() as u64));
+
+        self.process_request(method, url, headers, body, timeout)
+    }
+
     pub fn json_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
@@ -51,7 +68,7 @@ impl HttpClient {
         self.process_request(method, url, headers, request_json, timeout)
     }
 
-    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, request_timeout: Duration) -> Result<O, HttpClientError<E>>
+    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
@@ -70,11 +87,11 @@ impl HttpClient {
         request_headers.set(ContentType::octet_stream());
         request_headers.extend(headers.iter());
 
-        self.process_request(method, url, request_headers, body, request_timeout)
+        self.process_request(method, url, request_headers, body, timeout)
     }
 
     fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
-                                request_timeout: Duration
+                                timeout: Duration
     ) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
@@ -98,7 +115,7 @@ impl HttpClient {
 
         // Sadly, but for now it seems to be impossible to set socket or per-chunk timeout in hyper,
         // so we have to always operate with request timeout.
-        let timeout_time = Instant::now() + request_timeout;
+        let timeout_time = Instant::now() + timeout;
         let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP request timeout"))
         }).map_err(|e| {
