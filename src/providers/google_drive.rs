@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use hyper::Body;
-use hyper::header::{Authorization, Bearer, Headers};
+use hyper::header::{Authorization, Bearer, Location, Headers};
 use serde::{ser, de};
 use serde_json;
 
@@ -17,8 +17,7 @@ use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 const OAUTH_ENDPOINT: &'static str = "https://accounts.google.com/o/oauth2";
 const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
-// FIXME
-const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
+const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3";
 
 pub struct GoogleDrive {
     client_id: String,
@@ -46,6 +45,35 @@ impl GoogleDrive {
 
             client: HttpClient::new()?,
         })
+    }
+
+    // FIXME
+    fn new_file(&self, path: &str) -> GenericResult<(String, String)> {
+        if path == "/" {
+            return Err!("File already exists")
+        }
+
+        if !path.starts_with('/') || path.ends_with('/') {
+            return Err!("Invalid path: {:?}", path)
+        }
+
+        let mut components = path.rsplitn(2, '/');
+        let name = components.next().unwrap().to_owned();
+        let mut parent_path = components.next().unwrap();
+        if parent_path.is_empty() {
+            parent_path = "/";
+        }
+
+        let parent = match self.stat_path(&parent_path)? {
+            Some(parent) => parent,
+            None => return Err!("{:?} directory doesn't exist", parent_path),
+        };
+
+        if self.list_children(&parent.id)?.contains_key(&name) {
+            return Err!("File already exists")
+        }
+
+        return Ok((parent.id, name))
     }
 
     fn stat_path(&self, path: &str) -> GenericResult<Option<GoogleDriveFile>> {
@@ -206,13 +234,25 @@ impl GoogleDrive {
         return self.client.form_request(&url, request, Duration::from_secs(5));
     }
 
-    // FIXME: name
+    // FIXME
     fn api_request(&self, method: Method, path: &str) -> ApiResult<Request> {
         Ok(Request::new(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
             .with_header(Authorization(Bearer {token: self.access_token()?})))
     }
 
+    // FIXME
+    fn upload_request(&self, method: Method, path: &str) -> ApiResult<Request> {
+        Ok(Request::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5))
+            .with_header(Authorization(Bearer {token: self.access_token()?})))
+    }
+
     fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
+        where R: de::DeserializeOwned,
+    {
+        Ok(self.client.request(request)?.1)
+    }
+
+    fn send_upload_request<R>(&self, request: Request) -> Result<(Headers, R), HttpClientError<ApiError>>
         where R: de::DeserializeOwned,
     {
         self.client.request(request)
@@ -224,7 +264,7 @@ impl GoogleDrive {
               B: Into<Body>,
               O: de::DeserializeOwned,
     {
-        let url = CONTENT_ENDPOINT.to_owned() + path;
+        let url = UPLOAD_ENDPOINT.to_owned() + path;
         let mut headers = Headers::new();
 
         let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
@@ -294,12 +334,20 @@ impl WriteProvider for GoogleDrive {
     fn create_directory(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct Request<'a> {
-            path: &'a str,
+            name: &'a str,
+            #[serde(rename = "mimeType")]
+            mime_type: &'a str,
         }
 
-        let _: EmptyResponse = self.oauth_request("/files/create_folder_v2", &Request {
-            path: path
+        let (parent_id, name) = self.new_file(path)?;
+
+        let request = self.upload_request(Method::Post, "/files?uploadType=resumable")?.with_json(&Request {
+            name: &name,
+            mime_type: DIRECTORY_MIME_TYPE,
         })?;
+
+        let (headers, _): (Headers, Option<()>) = self.send_upload_request(request)?;
+        panic!(headers.get::<Location>().unwrap().clone());
 
         Ok(())
     }
@@ -402,6 +450,8 @@ impl WriteProvider for GoogleDrive {
     }
 }
 
+const DIRECTORY_MIME_TYPE: &'static str = "application/vnd.google-apps.folder";
+
 #[derive(Deserialize, Clone)]
 struct GoogleDriveFile {
     id: String,
@@ -412,7 +462,7 @@ struct GoogleDriveFile {
 
 impl GoogleDriveFile {
     fn type_(&self) -> FileType {
-        if self.mime_type == "application/vnd.google-apps.folder" {
+        if self.mime_type == DIRECTORY_MIME_TYPE {
             FileType::Directory
         } else if self.mime_type.starts_with("application/vnd.google-apps.") {
             FileType::Other

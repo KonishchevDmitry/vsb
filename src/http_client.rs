@@ -50,7 +50,7 @@ impl HttpClient {
         headers.set(ContentType::form_url_encoded());
         headers.set(ContentLength(body.len() as u64));
 
-        self.process_request(method, url, headers, body, timeout)
+        Ok(self.process_request(method, url, headers, body, timeout)?.1)
     }
 
     // FIXME: deprecate
@@ -61,7 +61,7 @@ impl HttpClient {
     {
         let request = Request::new(method, url.to_owned(), timeout).with_json(request)
             .map_err(HttpClientError::generic_from)?;
-        self.request(request)
+        Ok(self.request(request)?.1)
     }
 
     pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
@@ -83,11 +83,12 @@ impl HttpClient {
         request_headers.set(ContentType::octet_stream());
         request_headers.extend(headers.iter());
 
-        self.process_request(method, url, request_headers, body, timeout)
+        Ok(self.process_request(method, url, request_headers, body, timeout)?.1)
     }
 
     // FIXME: Deprecate all specialized methods
-    pub fn request<O, E>(&self, request: Request) -> Result<O, HttpClientError<E>>
+    // FIXME: Return response object?
+    pub fn request<O, E>(&self, request: Request) -> Result<(Headers, O), HttpClientError<E>>
         where O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
@@ -110,7 +111,7 @@ impl HttpClient {
 
     fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
                                 timeout: Duration
-    ) -> Result<O, HttpClientError<E>>
+    ) -> Result<(Headers, O), HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
@@ -147,6 +148,8 @@ impl HttpClient {
 
         // Response::body() borrows Response, so we have to store all fields that we need later
         let status = response.status();
+        let response_headers = response.headers().clone();
+        // FIXME: From response_headers?
         let content_type = response.headers().get::<ContentType>().map(
             |header_ref| header_ref.clone());
 
@@ -174,8 +177,10 @@ impl HttpClient {
             }
         }
 
-        Ok(serde_json::from_str(&body).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?)
+        let result = serde_json::from_str(&body).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+
+        Ok((response_headers, result))
     }
 }
 
