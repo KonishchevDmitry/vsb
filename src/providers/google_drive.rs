@@ -252,10 +252,9 @@ impl GoogleDrive {
         Ok(self.client.request(request)?.1)
     }
 
-    fn send_upload_request<R>(&self, request: Request) -> Result<(Headers, R), HttpClientError<ApiError>>
-        where R: de::DeserializeOwned,
-    {
-        self.client.request(request)
+    // FIXME
+    fn send_upload_request(&self, request: Request) -> GenericResult<(Headers, String)> {
+        Ok(self.client.raw_request(request).map_err(|e| format!("{:?}", e))?)
     }
 
     // FIXME
@@ -346,8 +345,8 @@ impl WriteProvider for GoogleDrive {
             mime_type: DIRECTORY_MIME_TYPE,
         })?;
 
-        let (headers, _): (Headers, Option<()>) = self.send_upload_request(request)?;
-        panic!(headers.get::<Location>().unwrap().clone());
+        let (headers, _) = self.send_upload_request(request)?;
+        panic!(format!("{:?}", headers.get::<Location>().unwrap().trim()));
 
         Ok(())
     }

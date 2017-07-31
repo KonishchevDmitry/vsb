@@ -109,12 +109,58 @@ impl HttpClient {
         self.process_request(request.method, &request.url, headers, request.body, request.timeout)
     }
 
+    // FIXME
     fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
                                 timeout: Duration
     ) -> Result<(Headers, O), HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
+    {
+        let (status, response_headers, body) = self.send_request(method, url, headers, body, timeout)
+            // FIXME
+            .map_err(HttpClientError::generic_from)?;
+
+        let content_type = response_headers.get::<ContentType>().map(
+            |header_ref| header_ref.clone());
+
+        if status != StatusCode::Ok {
+            return if status.is_client_error() || status.is_server_error() {
+                Err(HttpClientError::Api(parse_api_error(status, content_type, &body)
+                    .map_err(HttpClientError::generic_from)?))
+            } else {
+                Err!("Server returned an error: {}", status)
+            }
+        }
+
+        let result = serde_json::from_str(&body).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+
+        Ok((response_headers, result))
+    }
+
+    // FIXME
+    pub fn raw_request(&self, request: Request) -> Result<(Headers, String), HttpClientError<String>> // FIXME: Error type
+    {
+        let mut headers = self.default_headers.clone();
+        headers.extend(request.headers.iter());
+
+        // FIXME: logging
+        let (status, response_headers, body) = self.send_request(
+            request.method, &request.url, headers, request.body, request.timeout)?;
+
+        if status != StatusCode::Ok {
+            return Err!("Server returned an error: {}", status);
+        }
+
+        Ok((response_headers, body))
+    }
+
+    // FIXME
+    fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
+                       timeout: Duration
+    ) -> Result<(StatusCode, Headers, String), HttpClientError<String>> // FIXME: Error type
+        where I: Into<Body>
     {
         let url = url.parse().map_err(HttpClientError::generic_from)?;
 
@@ -149,9 +195,6 @@ impl HttpClient {
         // Response::body() borrows Response, so we have to store all fields that we need later
         let status = response.status();
         let response_headers = response.headers().clone();
-        // FIXME: From response_headers?
-        let content_type = response.headers().get::<ContentType>().map(
-            |header_ref| header_ref.clone());
 
         let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP response receiving timeout"))
@@ -168,19 +211,7 @@ impl HttpClient {
             format!("Got an invalid response from server: {}", e))?;
         trace!("Got {} response: {}", status, body);
 
-        if status != StatusCode::Ok {
-            return if status.is_client_error() || status.is_server_error() {
-                Err(HttpClientError::Api(parse_api_error(status, content_type, &body)
-                    .map_err(HttpClientError::generic_from)?))
-            } else {
-                Err!("Server returned an error: {}", status)
-            }
-        }
-
-        let result = serde_json::from_str(&body).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-
-        Ok((response_headers, result))
+        Ok((status, response_headers, body))
     }
 }
 
