@@ -48,15 +48,14 @@ impl GoogleDrive {
         })
     }
 
-    // FIXME: HERE
     fn stat_path(&self, path: &str) -> GenericResult<Option<GoogleDriveFile>> {
         let mut cur_path = "/".to_owned();
-        let mut cur_id = "root".to_owned();
+        let mut cur_dir_id = "root".to_owned();
 
         if path == "/" {
-            let request_path = "/files/".to_owned() + &cur_id;
+            let request_path = "/files/".to_owned() + &cur_dir_id;
             let request = self.api_request(Method::Get, &request_path)?;
-            return Ok(Some(self.request(request)?));
+            return Ok(Some(self.send_request(request)?));
         } else if !path.starts_with('/') || path.ends_with('/') {
             return Err!("Invalid path: {:?}", path);
         }
@@ -65,42 +64,39 @@ impl GoogleDrive {
         assert!(components.next().unwrap().is_empty());
 
         let mut component = components.next().unwrap();
-        let mut files = self.list_children(&cur_id).map_err(|e| format!(
-            "Error while reading {:?} directory: {}", cur_path, e))?;
 
         loop {
-            if component.is_empty() {
-                return Err!("Invalid path: {:?}", path);
+            let mut files = self.list_children(&cur_dir_id).map_err(|e| format!(
+                "Error while reading {:?} directory: {}", cur_path, e))?;
+
+            if !cur_path.ends_with('/') {
+                cur_path.push('/');
             }
+            cur_path += component;
 
             let file = match files.remove(component) {
                 Some(mut files) => {
-                    if files.len() > 1 {
-                        return Err!("{:?} path is unambiguous: it resolves to {} files",
-                                    cur_path, files.len());
-                    } else if files.len() != 1 {
-                        unreachable!();
+                    match files.len() {
+                        0 => unreachable!(),
+                        1 => files.pop().unwrap(),
+                        _ => return Err!("{:?} path is unambiguous: it resolves to {} files",
+                                    cur_path, files.len()),
                     }
-
-                    files.pop().unwrap()
                 },
                 None => return Ok(None),
             };
 
             component = match components.next() {
+                Some(component) if component.is_empty() => return Err!("Invalid path: {:?}", path),
                 Some(component) => component,
                 None => return Ok(Some(file)),
             };
-
-            cur_path = cur_path + "/" + component;
 
             if file.type_() != FileType::Directory {
                 return Err!("{:?} is not a directory", cur_path);
             }
 
-            cur_id = file.id;
-            files = self.list_children(&cur_id).map_err(|e| format!(
-                "Error while reading {:?} directory: {}", cur_path, e))?;
+            cur_dir_id = file.id;
         }
     }
 
@@ -130,19 +126,13 @@ impl GoogleDrive {
 
         loop {
             let request = self.api_request(Method::Get, "/files")?.with_params(&request_params)?;
-            let mut response: Response = self.request(request)?;
+            let mut response: Response = self.send_request(request)?;
 
             if response.incomplete_search {
                 return Err!("Got an incomplete result on directory listing")
             }
 
             for file in response.files.drain(..) {
-                // FIXME
-                if file.name.is_empty() || file.name.contains('/') {
-                    return Err!("The directory contains a file with an invalid name: {:?}",
-                                file.name)
-                }
-
                 files.entry(file.name.clone()).or_insert_with(Vec::new).push(file);
             }
 
@@ -222,8 +212,7 @@ impl GoogleDrive {
             .with_header(Authorization(Bearer {token: self.access_token()?})))
     }
 
-    // FIXME: name
-    fn request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
+    fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
         where R: de::DeserializeOwned,
     {
         self.client.request(request)
@@ -256,7 +245,6 @@ impl Provider for GoogleDrive {
 }
 
 impl ReadProvider for GoogleDrive {
-    // FIXME
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
         let file = match self.stat_path(path)? {
             Some(file) => file,
@@ -268,14 +256,20 @@ impl ReadProvider for GoogleDrive {
         }
 
         let mut files = Vec::new();
-        let mut google_drive_files = self.list_children(&file.id)?;
+        let mut children = self.list_children(&file.id)?;
 
-        for (name, mut name_files) in google_drive_files.drain() {
-            if name_files.len() > 1 {
-                return Err!("{:?} directory has a few files with {:?} name", path, name);
+        for (name, mut children) in children.drain() {
+            if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+                return Err!("{:?} directory contains a file with an invalid name: {:?}",
+                            path, file.name)
             }
 
-            files.extend(name_files.drain(..).map(|file| File {
+            if children.len() > 1 {
+                return Err!("{:?} directory has {} files with {:?} name",
+                            path, children.len(), name);
+            }
+
+            files.extend(children.drain(..).map(|file| File {
                 type_: file.type_(),
                 name: file.name,
             }));
