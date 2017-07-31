@@ -107,7 +107,7 @@ impl ReadProvider for Dropbox {
         let mut files = Vec::new();
 
         loop {
-            let response: Response = if let Some(ref cursor) = cursor {
+            let mut response: Response = if let Some(ref cursor) = cursor {
                 self.api_request("/files/list_folder/continue", &ContinueRequest {
                     cursor: &cursor
                 })
@@ -129,9 +129,9 @@ impl ReadProvider for Dropbox {
                 response
             }?;
 
-            for ref entry in response.entries {
+            for entry in response.entries.drain(..) {
                 files.push(File {
-                    name: entry.name.clone(),
+                    name: entry.name,
                     type_: match entry.tag.as_str() {
                         "folder" => FileType::Directory,
                         "file" => FileType::File,

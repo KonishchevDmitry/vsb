@@ -65,7 +65,7 @@ impl GoogleDrive {
         assert!(components.next().unwrap().is_empty());
 
         let mut component = components.next().unwrap();
-        let mut files = self.list_directory_by_id(&cur_id).map_err(|e| format!(
+        let mut files = self.list_children(&cur_id).map_err(|e| format!(
             "Error while reading {:?} directory: {}", cur_path, e))?;
 
         loop {
@@ -92,19 +92,19 @@ impl GoogleDrive {
                 None => return Ok(Some(file)),
             };
 
-            cur_id = file.id.clone();
             cur_path = cur_path + "/" + component;
 
             if file.type_() != FileType::Directory {
                 return Err!("{:?} is not a directory", cur_path);
             }
 
-            files = self.list_directory_by_id(&cur_id).map_err(|e| format!(
+            cur_id = file.id;
+            files = self.list_children(&cur_id).map_err(|e| format!(
                 "Error while reading {:?} directory: {}", cur_path, e))?;
         }
     }
 
-    fn list_directory_by_id(&self, id: &str) -> GenericResult<HashMap<String, Vec<GoogleDriveFile>>> {
+    fn list_children(&self, id: &str) -> GenericResult<HashMap<String, Vec<GoogleDriveFile>>> {
         #[derive(Serialize)]
         struct RequestParams {
             q: String,
@@ -130,20 +130,20 @@ impl GoogleDrive {
 
         loop {
             let request = self.api_request(Method::Get, "/files")?.with_params(&request_params)?;
-            let response: Response = self.request(request)?;
+            let mut response: Response = self.request(request)?;
 
             if response.incomplete_search {
                 return Err!("Got an incomplete result on directory listing")
             }
 
-            // FIXME: Drain here and everywhere
-            for file in response.files.iter() {
+            for file in response.files.drain(..) {
+                // FIXME
                 if file.name.is_empty() || file.name.contains('/') {
                     return Err!("The directory contains a file with an invalid name: {:?}",
                                 file.name)
                 }
 
-                files.entry(file.name.clone()).or_insert_with(Vec::new).push(file.clone());
+                files.entry(file.name.clone()).or_insert_with(Vec::new).push(file);
             }
 
             if let Some(next_page_token) = response.next_page_token {
@@ -268,7 +268,7 @@ impl ReadProvider for GoogleDrive {
         }
 
         let mut files = Vec::new();
-        let mut google_drive_files = self.list_directory_by_id(&file.id)?;
+        let mut google_drive_files = self.list_children(&file.id)?;
 
         for (name, mut name_files) in google_drive_files.drain() {
             if name_files.len() > 1 {

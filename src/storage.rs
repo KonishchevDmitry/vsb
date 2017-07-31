@@ -253,10 +253,10 @@ fn validate_backup(provider: &ReadProvider, available_checksums: &mut HashSet<St
     let data_files: HashSet<String> = ["data.tar.gz", "data.tar.bz2", "data.tar.7z"].iter()
         .map(|&s| s.to_owned()).collect();
 
-    let backup_files = provider.list_directory(&backup_path)?.ok_or_else(||
+    let mut backup_files = provider.list_directory(&backup_path)?.ok_or_else(||
         "the backup doesn't exist".to_owned())?;
 
-    let backup_files: HashSet<String> = backup_files.iter().map(|file| file.name.clone()).collect();
+    let backup_files: HashSet<String> = backup_files.drain(..).map(|file| file.name).collect();
 
     if backup_files.is_disjoint(&metadata_files) {
         return Err!("the backup is corrupted: metadata file is missing")
