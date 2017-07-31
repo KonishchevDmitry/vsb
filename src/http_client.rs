@@ -95,8 +95,7 @@ impl HttpClient {
             let mut extra_info = String::new();
 
             if let Some(body) = request.trace_body {
-                extra_info += " ";
-                extra_info += &body;
+                extra_info = extra_info + " " + &body;
             }
 
             trace!("Sending {method} {url}{extra_info}...",

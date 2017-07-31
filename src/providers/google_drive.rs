@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -47,92 +48,102 @@ impl GoogleDrive {
         })
     }
 
-    fn list_directory_by_id(&self, id: &str) -> GenericResult<Option<Vec<File>>> {
-        // FIXME
-        #[derive(Serialize)]
-        struct RequestParams<'a> {
-            q: &'a str,
-            pageSize: i32,
+    // FIXME: HERE
+    fn stat_path(&self, path: &str) -> GenericResult<Option<GoogleDriveFile>> {
+        let mut cur_path = "/".to_owned();
+        let mut cur_id = "root".to_owned();
+
+        if path == "/" {
+            let request_path = "/files/".to_owned() + &cur_id;
+            let request = self.api_request(Method::Get, &request_path)?;
+            return Ok(Some(self.request(request)?));
+        } else if !path.starts_with('/') || path.ends_with('/') {
+            return Err!("Invalid path: {:?}", path);
         }
 
-        // FIXME
+        let mut components = path.split('/');
+        assert!(components.next().unwrap().is_empty());
+
+        let mut component = components.next().unwrap();
+        let mut files = self.list_directory_by_id(&cur_id).map_err(|e| format!(
+            "Error while reading {:?} directory: {}", cur_path, e))?;
+
+        loop {
+            if component.is_empty() {
+                return Err!("Invalid path: {:?}", path);
+            }
+
+            let file = match files.remove(component) {
+                Some(mut files) => {
+                    if files.len() > 1 {
+                        return Err!("{:?} path is unambiguous: it resolves to {} files",
+                                    cur_path, files.len());
+                    } else if files.len() != 1 {
+                        unreachable!();
+                    }
+
+                    files.pop().unwrap()
+                },
+                None => return Ok(None),
+            };
+
+            component = match components.next() {
+                Some(component) => component,
+                None => return Ok(Some(file)),
+            };
+
+            cur_id = file.id.clone();
+            cur_path = cur_path + "/" + component;
+
+            if file.type_() != FileType::Directory {
+                return Err!("{:?} is not a directory", cur_path);
+            }
+
+            files = self.list_directory_by_id(&cur_id).map_err(|e| format!(
+                "Error while reading {:?} directory: {}", cur_path, e))?;
+        }
+    }
+
+    fn list_directory_by_id(&self, id: &str) -> GenericResult<HashMap<String, Vec<GoogleDriveFile>>> {
         #[derive(Serialize)]
-        struct ContinueRequestParams<'a> {
-            q: &'a str,
+        struct RequestParams {
+            q: String,
             #[serde(rename = "pageToken")]
-            page_token: &'a str,
-            pageSize: i32,
+            page_token: Option<String>,
         }
 
         #[derive(Deserialize)]
         struct Response {
-            files: Vec<Entry>,
+            files: Vec<GoogleDriveFile>,
             #[serde(rename = "incompleteSearch")]
             incomplete_search: bool,
             #[serde(rename = "nextPageToken")]
             next_page_token: Option<String>,
         }
 
-        #[derive(Deserialize)]
-        struct Entry {
-            id: String,
-            name: String,
-            #[serde(rename = "mimeType")]
-            mime_type: String,
-        }
-
-        let mut page_token: Option<String> = None;
+        let mut request_params = RequestParams {
+            q: format!("'{}' in parents and trashed = false", id),
+            page_token: None,
+        };
         let (mut page, page_limit) = (1, 1000);
-        let mut files = Vec::new();
+        let mut files = HashMap::new();
 
         loop {
-            let response: Response = if let Some(ref page_token) = page_token {
-                let request = self.api_request(Method::Get, "/files")?.with_params(&ContinueRequestParams {
-                    q: "'root' in parents and trashed = false",
-                    page_token: page_token,
-                    pageSize: 3,
-                })?;
-
-                self.client.request(request)
-            } else {
-                // FIXME: id
-
-                let request = self.api_request(Method::Get, "/files")?.with_params(&RequestParams {
-                    q: "'root' in parents and trashed = false",
-                    pageSize: 3,
-                })?;
-                // FIXME: infer
-                let response: ApiResult<Response> = self.client.request(request);
-
-                // FIXME
-//                if let Err(HttpClientError::Api(ref e)) = response {
-//                    if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {
-//                        if let Some(ref e) = e.error.path {
-//                            if e.tag == "not_found" {
-//                                return Ok(None);
-//                            }
-//                        }
-//                    }
-//                }
-
-                response
-            }?;
+            let request = self.api_request(Method::Get, "/files")?.with_params(&request_params)?;
+            let response: Response = self.request(request)?;
 
             if response.incomplete_search {
                 return Err!("Got an incomplete result on directory listing")
             }
 
-            for ref file in response.files {
-                files.push(File {
-                    name: file.name.clone(),
-                    type_: if file.mime_type == "application/vnd.google-apps.folder" {
-                        FileType::Directory
-                    } else if file.mime_type.starts_with("application/vnd.google-apps.") {
-                        FileType::Other
-                    } else {
-                        FileType::File
-                    },
-                });
+            // FIXME: Drain here and everywhere
+            for file in response.files.iter() {
+                if file.name.is_empty() || file.name.contains('/') {
+                    return Err!("The directory contains a file with an invalid name: {:?}",
+                                file.name)
+                }
+
+                files.entry(file.name.clone()).or_insert_with(Vec::new).push(file.clone());
             }
 
             if let Some(next_page_token) = response.next_page_token {
@@ -140,14 +151,14 @@ impl GoogleDrive {
                     return Err!("Directory listing page limit has exceeded");
                 }
 
-                page_token = Some(next_page_token);
+                request_params.page_token = Some(next_page_token);
                 page += 1;
             } else {
                 break;
             }
         }
 
-        Ok(Some(files))
+        Ok(files)
     }
 
     fn access_token(&self) -> ApiResult<String> {
@@ -196,6 +207,7 @@ impl GoogleDrive {
         Ok(response.access_token)
     }
 
+    // FIXME: name
     fn oauth_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<OauthApiError>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
@@ -204,9 +216,17 @@ impl GoogleDrive {
         return self.client.form_request(&url, request, Duration::from_secs(5));
     }
 
+    // FIXME: name
     fn api_request(&self, method: Method, path: &str) -> ApiResult<Request> {
         Ok(Request::new(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
             .with_header(Authorization(Bearer {token: self.access_token()?})))
+    }
+
+    // FIXME: name
+    fn request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
+        where R: de::DeserializeOwned,
+    {
+        self.client.request(request)
     }
 
     // FIXME
@@ -238,7 +258,30 @@ impl Provider for GoogleDrive {
 impl ReadProvider for GoogleDrive {
     // FIXME
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
-        self.list_directory_by_id(path)
+        let file = match self.stat_path(path)? {
+            Some(file) => file,
+            None => return Ok(None),
+        };
+
+        if file.type_() != FileType::Directory {
+            return Err!("{:?} is not a directory", path);
+        }
+
+        let mut files = Vec::new();
+        let mut google_drive_files = self.list_directory_by_id(&file.id)?;
+
+        for (name, mut name_files) in google_drive_files.drain() {
+            if name_files.len() > 1 {
+                return Err!("{:?} directory has a few files with {:?} name", path, name);
+            }
+
+            files.extend(name_files.drain(..).map(|file| File {
+                type_: file.type_(),
+                name: file.name,
+            }));
+        }
+
+        Ok(Some(files))
     }
 }
 
@@ -365,40 +408,45 @@ impl WriteProvider for GoogleDrive {
     }
 }
 
-// FIXME
+#[derive(Deserialize, Clone)]
+struct GoogleDriveFile {
+    id: String,
+    name: String,
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+}
+
+impl GoogleDriveFile {
+    fn type_(&self) -> FileType {
+        if self.mime_type == "application/vnd.google-apps.folder" {
+            FileType::Directory
+        } else if self.mime_type.starts_with("application/vnd.google-apps.") {
+            FileType::Other
+        } else {
+            FileType::File
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiError {
-    error: RouteError,
-    error_summary: String,
+    error: ApiErrorObject,
 }
 
-// FIXME
 #[derive(Debug, Deserialize)]
-struct RouteError {
-    #[serde(rename = ".tag")]
-    tag: Option<String>,
-    path: Option<PathError>,
-}
-
-// FIXME
-#[derive(Debug, Deserialize)]
-struct PathError {
-    #[serde(rename = ".tag")]
-    tag: String,
+struct ApiErrorObject {
+    message: String,
 }
 
 impl Error for ApiError {
-    // FIXME
     fn description(&self) -> &str {
-        "Dropbox API error"
+        "Google Drive error"
     }
 }
 
 impl fmt::Display for ApiError {
-    // FIXME
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Dropbox API error: {}",
-               self.error_summary.trim_right_matches(|c| c == '.' || c == '/'))
+        write!(f, "{}: {}", self.description(), self.error.message)
     }
 }
 
@@ -415,6 +463,6 @@ impl Error for OauthApiError {
 
 impl fmt::Display for OauthApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Google OAuth error: {}", self.error_description)
+        write!(f, "{}: {}", self.description(), self.error_description)
     }
 }
