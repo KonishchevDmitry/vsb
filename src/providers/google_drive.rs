@@ -332,21 +332,36 @@ impl WriteProvider for GoogleDrive {
     // FIXME
     fn create_directory(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
-        struct Request<'a> {
+        struct CreateRequest<'a> {
             name: &'a str,
             #[serde(rename = "mimeType")]
             mime_type: &'a str,
+            parents: Vec<String>,
         }
 
         let (parent_id, name) = self.new_file(path)?;
 
-        let request = self.upload_request(Method::Post, "/files?uploadType=resumable")?.with_json(&Request {
+        let mut parents = Vec::new();
+        parents.push(parent_id);
+
+        let request = self.upload_request(Method::Post, "/files?uploadType=resumable")?.with_json(&CreateRequest {
             name: &name,
             mime_type: DIRECTORY_MIME_TYPE,
+            parents: parents,
         })?;
 
         let (headers, _) = self.send_upload_request(request)?;
-        panic!(format!("{:?}", headers.get::<Location>().unwrap().trim()));
+
+        let location = match headers.get::<Location>() {
+            Some(location) => location,
+            None => return Err!(concat!(
+                "Got an invalid response from Google Drive API: ",
+                "upload session has been created, but session URI hasn't been returned"
+            )),
+        };
+
+        let request = Request::new(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
+        let _: EmptyResponse = self.send_request(request)?; // FIXME: Send request?
 
         Ok(())
     }
