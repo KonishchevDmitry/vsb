@@ -229,24 +229,3 @@ impl<T> From<hyper::Error> for HttpClientError<T> {
         HttpClientError::generic_from(err)
     }
 }
-
-fn parse_api_error<T>(status: StatusCode, content_type: Option<ContentType>, body: &str) -> GenericResult<T>
-    where T: de::DeserializeOwned
-{
-    let content_type = content_type.ok_or_else(|| format!(
-        "Server returned {} error with an invalid content type", status))?;
-
-    if content_type.type_() == mime::TEXT && content_type.subtype() == mime::PLAIN {
-        let mut error = body.lines().next().unwrap_or("").trim_right_matches('.').trim().to_owned();
-        if error.is_empty() {
-            error = status.to_string();
-        }
-        return Err!("Server returned an error: {}", error);
-    } else if content_type.type_() == mime::APPLICATION && content_type.subtype() == mime::JSON {
-        return Ok(serde_json::from_str(body).map_err(|e| format!(
-            "Server returned an invalid JSON response: {}", e))?);
-    }
-
-    Err!("Server returned {} error with an invalid content type: {}",
-        status, content_type)
-}
