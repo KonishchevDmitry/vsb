@@ -4,7 +4,7 @@ use std::io;
 use std::time::{Instant, Duration};
 
 use futures::{Future, Stream};
-use hyper::{self, Client, Body, Response, StatusCode, Chunk};
+use hyper::{self, Client, Body, StatusCode, Chunk};
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper_tls::HttpsConnector;
 use log::LogLevel;
@@ -14,10 +14,11 @@ use serde_json;
 use serde_urlencoded;
 use tokio_core::reactor::{Core, Timeout};
 
+// FIXME
 pub use hyper::{Method, Headers};
 
 use core::GenericResult;
-use super::request::Request;
+use super::{Request, Response};
 
 pub struct HttpClient {
     default_headers: Headers,
@@ -118,26 +119,29 @@ impl HttpClient {
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let (status, response_headers, body) = self.send_request(method, url, headers, body, timeout)
+        let response = self.send_request(method, url, headers, body, timeout)
             // FIXME
             .map_err(HttpClientError::generic_from)?;
 
-        let content_type = response_headers.get::<ContentType>().map(
+        let content_type = response.headers.get::<ContentType>().map(
             |header_ref| header_ref.clone());
 
-        if status != StatusCode::Ok {
-            return if status.is_client_error() || status.is_server_error() {
-                Err(HttpClientError::Api(parse_api_error(status, content_type, &body)
+        let body = String::from_utf8(response.body.to_vec()).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+
+        if response.status != StatusCode::Ok {
+            return if response.status.is_client_error() || response.status.is_server_error() {
+                Err(HttpClientError::Api(parse_api_error(response.status, content_type, &body)
                     .map_err(HttpClientError::generic_from)?))
             } else {
-                Err!("Server returned an error: {}", status)
+                Err!("Server returned an error: {}", response.status)
             }
         }
 
         let result = serde_json::from_str(&body).map_err(|e|
             format!("Got an invalid response from server: {}", e))?;
 
-        Ok((response_headers, result))
+        Ok((response.headers, result))
     }
 
     // FIXME
@@ -147,20 +151,23 @@ impl HttpClient {
         headers.extend(request.headers.iter());
 
         // FIXME: logging
-        let (status, response_headers, body) = self.send_request(
+        let response = self.send_request(
             request.method, &request.url, headers, request.body, request.timeout)?;
 
-        if status != StatusCode::Ok {
-            return Err!("Server returned an error: {}", status);
+        if response.status != StatusCode::Ok {
+            return Err!("Server returned an error: {}", response.status);
         }
 
-        Ok((response_headers, body))
+        let body = String::from_utf8(response.body.to_vec()).map_err(|e|
+            format!("Got an invalid response from server: {}", e))?;
+
+        Ok((response.headers, body))
     }
 
     // FIXME
     fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
                        timeout: Duration
-    ) -> Result<(StatusCode, Headers, String), HttpClientError<String>> // FIXME: Error type
+    ) -> Result<Response, HttpClientError<String>> // FIXME: Error type
         where I: Into<Body>
     {
         let url = url.parse().map_err(HttpClientError::generic_from)?;
@@ -188,7 +195,7 @@ impl HttpClient {
             e.into()
         });
 
-        let response: Response = match core.run(client.request(http_request).select(timeout)) {
+        let response: hyper::Response = match core.run(client.request(http_request).select(timeout)) {
             Ok((response, _)) => Ok(response),
             Err((err, _)) => Err(err),
         }?;
@@ -207,12 +214,14 @@ impl HttpClient {
             Ok((body, _)) => Ok(body),
             Err((err, _)) => Err(err),
         }?;
+        let body = body.to_vec();
+        trace!("Got {} response: {}", status, String::from_utf8_lossy(&body));
 
-        let body = String::from_utf8(body.to_vec()).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-        trace!("Got {} response: {}", status, body);
-
-        Ok((status, response_headers, body))
+        Ok(Response {
+            status: status,
+            headers: response_headers,
+            body: body,
+        })
     }
 }
 
