@@ -4,7 +4,7 @@ use std::io;
 use std::time::{Instant, Duration};
 
 use futures::{Future, Stream};
-use hyper::{self, Client, Headers, Body, Response, StatusCode, Chunk};
+use hyper::{self, Client, Body, Response, StatusCode, Chunk};
 use hyper::header::{Header, UserAgent, ContentLength, ContentType};
 use hyper_tls::HttpsConnector;
 use log::LogLevel;
@@ -14,7 +14,7 @@ use serde_json;
 use serde_urlencoded;
 use tokio_core::reactor::{Core, Timeout};
 
-pub use hyper::Method;
+pub use hyper::{Method, Headers};
 
 use core::GenericResult;
 use super::request::Request;
@@ -250,6 +250,7 @@ impl<T: fmt::Display> fmt::Display for HttpClientError<T> {
     }
 }
 
+// FIXME: Do we need these conversions?
 impl<T> From<String> for HttpClientError<T> {
     fn from(err: String) -> HttpClientError<T> {
         HttpClientError::Generic(err)

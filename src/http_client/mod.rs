@@ -3,5 +3,7 @@
 pub mod client;
 pub mod request;
 
-pub use self::client::{HttpClient, Method, EmptyResponse, HttpClientError};
+mod readers;
+
+pub use self::client::{HttpClient, Method, Headers, EmptyResponse, HttpClientError};
 pub use self::request::Request;
