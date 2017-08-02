@@ -21,6 +21,7 @@ pub struct Request {
     pub body: Option<Body>,
     pub timeout: Duration,
 
+    pub trace_headers: Vec<String>,
     pub trace_body: Option<String>,
 }
 
@@ -33,6 +34,8 @@ impl Request {
             body: None,
             timeout: timeout,
 
+            // FIXME
+            trace_headers: Vec::new(),
             trace_body: None,
         }
     }
@@ -51,7 +54,12 @@ impl Request {
         Ok(self)
     }
 
-    pub fn with_header<H: Header>(mut self, header: H) -> Request {
+    // FIXME: ::std::fmt::Display
+    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request {
+        if trace {
+            // FIXME
+            self.trace_headers.push(header.to_string())
+        }
         self.headers.set(header);
         self
     }

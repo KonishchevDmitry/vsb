@@ -237,13 +237,13 @@ impl GoogleDrive {
     // FIXME
     fn api_request(&self, method: Method, path: &str) -> ApiResult<Request> {
         Ok(Request::new(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
-            .with_header(Authorization(Bearer {token: self.access_token()?})))
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     // FIXME
     fn upload_request(&self, method: Method, path: &str) -> ApiResult<Request> {
         Ok(Request::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5))
-            .with_header(Authorization(Bearer {token: self.access_token()?})))
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
@@ -255,8 +255,14 @@ impl GoogleDrive {
     }
 
     // FIXME
-    fn send_upload_request(&self, request: Request) -> GenericResult<(Headers, String)> {
-        Ok(self.client.raw_request(request).map_err(|e| format!("{:?}", e))?)
+    fn send_upload_request(&self, request: Request) -> GenericResult<(Headers, Vec<u8>)> {
+        let response = self.client.raw_request(request).map_err(|e| {
+            match e {
+                HttpClientError::Generic(e) => format!("{:?}", e),
+                HttpClientError::Api(response) => response.status.to_string(),
+            }
+        })?;
+        Ok((response.headers, response.body))
     }
 
     // FIXME

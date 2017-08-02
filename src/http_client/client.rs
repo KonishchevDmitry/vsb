@@ -18,7 +18,7 @@ use tokio_core::reactor::{Core, Timeout};
 pub use hyper::{Method, Headers};
 
 use core::GenericResult;
-use super::{Request, NewRequest, Response};
+use super::{Request, NewRequest, Response, RawResponseReader};
 
 pub struct HttpClient {
     default_headers: Headers,
@@ -39,20 +39,16 @@ impl HttpClient {
         self
     }
 
+    // FIXME: deprecate
     pub fn form_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let method = Method::Post;
-        let body = serde_urlencoded::to_string(request).map_err(HttpClientError::generic_from)?;
-        trace!("Sending {method} {url} {body}...", method=method, url=url, body=body);
+        let request = Request::new(Method::Post, url.to_owned(), timeout).with_form(request)
+            .map_err(HttpClientError::generic_from)?;
 
-        let mut headers = self.default_headers.clone();
-        headers.set(ContentType::form_url_encoded());
-        headers.set(ContentLength(body.len() as u64));
-
-        Ok(self.process_request(method, url, headers, body, timeout)?.1)
+        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
     }
 
     // FIXME: deprecate
@@ -67,36 +63,40 @@ impl HttpClient {
         NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
     }
 
+    // FIXME: deprecate
     pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: Into<Body>,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let method = Method::Post;
+        let mut request = Request::new(Method::Post, url.to_owned(), timeout)
+            .with_body(ContentType::octet_stream(), None, body)
+            .map_err(HttpClientError::generic_from)?;
 
-        if headers.len() == 0 {
-            trace!("Sending {method} {url}...", method=method, url=url);
-        } else {
-            trace!("Sending {method} {url}:\n{headers}", method=method, url=url,
-                   headers=headers.iter().map(|header| header.to_string().trim_right_matches("\r\n").to_owned())
-                       .collect::<Vec<_>>().join("\n"));
-        }
+        // FIXME: trace
+        request.headers.extend(headers.iter());
 
-        let mut request_headers = self.default_headers.clone();
-        request_headers.set(ContentType::octet_stream());
-        request_headers.extend(headers.iter());
-
-        Ok(self.process_request(method, url, request_headers, body, timeout)?.1)
+        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
     }
 
-    // FIXME: Deprecate all specialized methods
-    // FIXME: Return response object?
-    pub fn request<O, E>(&self, request: Request) -> Result<(Headers, O), HttpClientError<E>>
-        where O: de::DeserializeOwned,
-              E: de::DeserializeOwned + Error,
+    // FIXME: deprecate
+    pub fn raw_request(&self, request: Request) -> Result<Response, HttpClientError<Response>> // FIXME: Error type
     {
+        NewRequest::new(RawResponseReader::new(), RawResponseReader::new())
+            .get_result(self.send(request).map_err(HttpClientError::generic_from)?)
+    }
+
+    // FIXME
+    fn send(&self, request: Request) -> Result<Response, HttpClientError<String>> { // FIXME: Error type
+        // FIXME
         if log_enabled!(LogLevel::Trace) {
             let mut extra_info = String::new();
+
+            if request.trace_headers.len() != 0 {
+                extra_info += &format!("\n{}", request.trace_headers.iter()
+                    .map(|header| header/*.to_string()*/.trim_right_matches("\r\n").to_owned())
+                           .collect::<Vec<_>>().join("\n"));
+            }
 
             if let Some(body) = request.trace_body {
                 extra_info = extra_info + " " + &body;
@@ -109,65 +109,7 @@ impl HttpClient {
         let mut headers = self.default_headers.clone();
         headers.extend(request.headers.iter());
 
-        self.process_request(request.method, &request.url, headers, request.body, request.timeout)
-    }
-
-    // FIXME
-    fn process_request<I, O, E>(&self, method: Method, url: &str, headers: Headers, body: I,
-                                timeout: Duration
-    ) -> Result<(Headers, O), HttpClientError<E>>
-        where I: Into<Body>,
-              O: de::DeserializeOwned,
-              E: de::DeserializeOwned + Error,
-    {
-        let response = self.send_request(method, url, headers, body, timeout)
-            // FIXME
-            .map_err(HttpClientError::generic_from)?;
-
-        let content_type = response.headers.get::<ContentType>().map(
-            |header_ref| header_ref.clone());
-
-        let body = String::from_utf8(response.body.to_vec()).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-
-        if response.status != StatusCode::Ok {
-            return if response.status.is_client_error() || response.status.is_server_error() {
-                Err(HttpClientError::Api(parse_api_error(response.status, content_type, &body)
-                    .map_err(HttpClientError::generic_from)?))
-            } else {
-                Err!("Server returned an error: {}", response.status)
-            }
-        }
-
-        let result = serde_json::from_str(&body).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-
-        Ok((response.headers, result))
-    }
-
-    // FIXME
-    pub fn raw_request(&self, request: Request) -> Result<(Headers, String), HttpClientError<String>> // FIXME: Error type
-    {
-        let mut headers = self.default_headers.clone();
-        headers.extend(request.headers.iter());
-
-        // FIXME: logging
-        let response = self.send_request(
-            request.method, &request.url, headers, request.body, request.timeout)?;
-
-        if response.status != StatusCode::Ok {
-            return Err!("Server returned an error: {}", response.status);
-        }
-
-        let body = String::from_utf8(response.body.to_vec()).map_err(|e|
-            format!("Got an invalid response from server: {}", e))?;
-
-        Ok((response.headers, body))
-    }
-
-    // FIXME
-    fn send(&self, request: Request) -> Result<Response, HttpClientError<String>> { // FIXME: Error type
-        self.send_request(request.method, &request.url, request.headers, request.body, request.timeout)
+        self.send_request(request.method, &request.url, headers, request.body, request.timeout)
     }
 
     // FIXME
