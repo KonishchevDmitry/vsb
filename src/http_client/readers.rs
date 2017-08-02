@@ -19,7 +19,7 @@ pub struct JsonReplyReader<T> {
 }
 
 impl<T: de::DeserializeOwned> JsonReplyReader<T> {
-    fn new() -> JsonReplyReader<T> {
+    pub fn new() -> JsonReplyReader<T> {
         JsonReplyReader{
             phantom: PhantomData
         }
@@ -48,7 +48,7 @@ pub struct JsonErrorReader<T> {
 }
 
 impl<T: de::DeserializeOwned> JsonErrorReader<T> {
-    fn new() -> JsonErrorReader<T> {
+    pub fn new() -> JsonErrorReader<T> {
         JsonErrorReader{
             phantom: PhantomData
         }
@@ -82,5 +82,22 @@ impl<T: de::DeserializeOwned> ResponseReader for JsonErrorReader<T> {
             Err!("Server returned {} error with an invalid content type: {}",
                  response.status, content_type)
         }
+    }
+}
+
+pub struct RawResponseReader {
+}
+
+impl RawResponseReader {
+    pub fn new() -> RawResponseReader {
+        RawResponseReader {}
+    }
+}
+
+impl ResponseReader for RawResponseReader {
+    type Result = Response;
+
+    fn read(&self, response: Response) -> GenericResult<Self::Result> {
+        Ok(response)
     }
 }

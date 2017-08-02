@@ -10,7 +10,8 @@ use serde_urlencoded;
 use tokio_core::reactor::Timeout;
 
 use core::GenericResult;
-use super::{Method, Headers, StatusCode, Response, ResponseReader, HttpClientError};
+use super::{Method, Headers, StatusCode, Response, ResponseReader, JsonReplyReader, JsonErrorReader,
+            HttpClientError};
 
 // FIXME: pub?
 pub struct Request {
@@ -96,7 +97,7 @@ impl Request {
 
 
 // FIXME
-struct NewRequest<R, E> {
+pub struct NewRequest<R, E> {
     reply_reader: Box<ResponseReader<Result=R>>,
     error_reader: Box<ResponseReader<Result=E>>,
 }
@@ -121,5 +122,11 @@ impl<R, E> NewRequest<R, E> {
         } else {
             Err!("Server returned an error: {}", response.status)
         }
+    }
+}
+
+impl<R: de::DeserializeOwned + 'static, E: de::DeserializeOwned + 'static> NewRequest<R, E> {
+    fn new_json() -> NewRequest<R, E> {
+        NewRequest::new(JsonReplyReader::new(), JsonErrorReader::new())
     }
 }
