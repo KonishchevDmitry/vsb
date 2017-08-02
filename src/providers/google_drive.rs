@@ -249,7 +249,9 @@ impl GoogleDrive {
     fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
         where R: de::DeserializeOwned,
     {
-        Ok(self.client.request(request)?.1)
+        // FIXME
+        unimplemented!()
+//        Ok(self.client.request(request)?)
     }
 
     // FIXME

@@ -18,7 +18,7 @@ use tokio_core::reactor::{Core, Timeout};
 pub use hyper::{Method, Headers};
 
 use core::GenericResult;
-use super::{Request, Response};
+use super::{Request, NewRequest, Response};
 
 pub struct HttpClient {
     default_headers: Headers,
@@ -63,7 +63,8 @@ impl HttpClient {
     {
         let request = Request::new(method, url.to_owned(), timeout).with_json(request)
             .map_err(HttpClientError::generic_from)?;
-        Ok(self.request(request)?.1)
+
+        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
     }
 
     pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
@@ -165,6 +166,11 @@ impl HttpClient {
     }
 
     // FIXME
+    fn send(&self, request: Request) -> Result<Response, HttpClientError<String>> { // FIXME: Error type
+        self.send_request(request.method, &request.url, request.headers, request.body, request.timeout)
+    }
+
+    // FIXME
     fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
                        timeout: Duration
     ) -> Result<Response, HttpClientError<String>> // FIXME: Error type
@@ -236,6 +242,7 @@ pub enum HttpClientError<T> {
 }
 
 impl<T> HttpClientError<T> {
+    // FIXME: Do we need these conversions?
     pub fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
         HttpClientError::Generic(error.to_string())
     }

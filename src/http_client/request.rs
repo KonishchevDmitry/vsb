@@ -95,17 +95,17 @@ impl Request {
     }
 }
 
-
 // FIXME
-pub struct NewRequest<R, E> {
-    reply_reader: Box<ResponseReader<Result=R>>,
-    error_reader: Box<ResponseReader<Result=E>>,
+// FIXME: lifetimes
+pub struct NewRequest<'a, R, E> {
+    reply_reader: Box<ResponseReader<Result=R> + 'a>,
+    error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
 
-impl<R, E> NewRequest<R, E> {
-    fn new<RR, ER>(reply_reader: RR, error_reader: ER) -> NewRequest<R, E>
-        where RR: ResponseReader<Result=R> + 'static,
-              ER: ResponseReader<Result=E> + 'static
+impl<'a, R, E> NewRequest<'a, R, E> {
+    pub fn new<RR, ER>(reply_reader: RR, error_reader: ER) -> NewRequest<'a, R, E>
+        where RR: ResponseReader<Result=R> + 'a,
+              ER: ResponseReader<Result=E> + 'a
     {
         NewRequest {
             reply_reader: Box::new(reply_reader),
@@ -113,7 +113,7 @@ impl<R, E> NewRequest<R, E> {
         }
     }
 
-    fn get_result(&self, response: Response) -> Result<R, HttpClientError<E>> {
+    pub fn get_result(&self, response: Response) -> Result<R, HttpClientError<E>> {
         if response.status.is_success() {
             Ok(self.reply_reader.read(response).map_err(HttpClientError::generic_from)?)
         } else if response.status.is_client_error() || response.status.is_server_error() {
@@ -125,8 +125,8 @@ impl<R, E> NewRequest<R, E> {
     }
 }
 
-impl<R: de::DeserializeOwned + 'static, E: de::DeserializeOwned + 'static> NewRequest<R, E> {
-    fn new_json() -> NewRequest<R, E> {
+impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> NewRequest<'a, R, E> {
+    pub fn new_json() -> NewRequest<'a, R, E> {
         NewRequest::new(JsonReplyReader::new(), JsonErrorReader::new())
     }
 }
