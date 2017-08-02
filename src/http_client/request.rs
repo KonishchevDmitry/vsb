@@ -10,11 +10,11 @@ use serde_urlencoded;
 use tokio_core::reactor::Timeout;
 
 use core::GenericResult;
-use super::{Method, Headers, StatusCode, Response, ResponseReader, JsonReplyReader, JsonErrorReader,
-            HttpClientError};
+use super::{Method, Headers, StatusCode, Response, ResponseReader, RawResponseReader,
+            JsonReplyReader, JsonErrorReader, HttpClientError};
 
 // FIXME: pub?
-pub struct Request {
+pub struct Request<'a> {
     pub method: Method,
     pub url: String,
     pub headers: Headers,
@@ -23,10 +23,13 @@ pub struct Request {
 
     pub trace_headers: Vec<String>,
     pub trace_body: Option<String>,
+
+    // FIXME
+    pub new_request: NewRequest<'a, Response, Response>,
 }
 
-impl Request {
-    pub fn new(method: Method, url: String, timeout: Duration) -> Request {
+impl<'a> Request<'a> {
+    pub fn new(method: Method, url: String, timeout: Duration) -> Request<'a> {
         Request {
             method: method,
             url: url.to_owned(),
@@ -37,10 +40,12 @@ impl Request {
             // FIXME
             trace_headers: Vec::new(),
             trace_body: None,
+
+            new_request: NewRequest::new(RawResponseReader::new(), RawResponseReader::new()),
         }
     }
 
-    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request> {
+    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request<'a>> {
         let query_string = serde_urlencoded::to_string(params)?;
 
         self.url += if self.url.contains('?') {
@@ -55,7 +60,7 @@ impl Request {
     }
 
     // FIXME: ::std::fmt::Display
-    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request {
+    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request<'a> {
         if trace {
             // FIXME
             self.trace_headers.push(header.to_string())
@@ -65,7 +70,7 @@ impl Request {
     }
 
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
-                                    body: B) -> GenericResult<Request> {
+                                    body: B) -> GenericResult<Request<'a>> {
         if self.body.is_some() {
             return Err!("An attempt to set request body twice")
         }
@@ -80,7 +85,7 @@ impl Request {
         Ok(self)
     }
 
-    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request> {
+    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request<'a>> {
         let content_length = Some(body.len() as u64);
 
         if log_enabled!(LogLevel::Trace) {
@@ -92,12 +97,12 @@ impl Request {
         }
     }
 
-    pub fn with_form<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request> {
+    pub fn with_form<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request<'a>> {
         let body = serde_urlencoded::to_string(request)?;
         Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
     }
 
-    pub fn with_json<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request> {
+    pub fn with_json<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request<'a>> {
         let body = serde_json::to_string(request)?;
         Ok(self.with_text_body(ContentType::json(), body)?)
     }
@@ -106,8 +111,9 @@ impl Request {
 // FIXME
 // FIXME: lifetimes
 pub struct NewRequest<'a, R, E> {
-    reply_reader: Box<ResponseReader<Result=R> + 'a>,
-    error_reader: Box<ResponseReader<Result=E> + 'a>,
+    // FIXME: private
+    pub reply_reader: Box<ResponseReader<Result=R> + 'a>,
+    pub error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
 
 impl<'a, R, E> NewRequest<'a, R, E> {

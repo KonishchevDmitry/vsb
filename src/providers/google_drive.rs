@@ -246,6 +246,7 @@ impl GoogleDrive {
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
+    // FIXME
     fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
         where R: de::DeserializeOwned,
     {

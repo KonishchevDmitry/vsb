@@ -109,6 +109,9 @@ impl HttpClient {
         let mut headers = self.default_headers.clone();
         headers.extend(request.headers.iter());
 
+        let reply_reader = request.new_request.reply_reader;
+        let error_reader = request.new_request.error_reader;
+
         self.send_request(request.method, &request.url, headers, request.body, request.timeout)
     }
 
