@@ -21,11 +21,11 @@ pub struct Dropbox {
 }
 
 impl Dropbox {
-    pub fn new(access_token: &str) -> GenericResult<Dropbox> {
-        Ok(Dropbox {
-            client: HttpClient::new()?
-                .with_default_header(Authorization(Bearer {token: access_token.to_owned()}))
-        })
+    pub fn new(access_token: &str) -> Dropbox {
+        Dropbox {
+            client: HttpClient::new().with_default_header(
+                Authorization(Bearer {token: access_token.to_owned()}))
+        }
     }
 
     fn rename_file(&self, src: &str, dst: &str) -> EmptyResult {

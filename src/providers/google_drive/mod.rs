@@ -11,41 +11,30 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, Method, Request, Response, EmptyResponse, RawResponseReader,
+use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyResponse, RawResponseReader,
                   JsonErrorReader, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-const OAUTH_ENDPOINT: &'static str = "https://accounts.google.com/o/oauth2";
+mod oauth;
+use self::oauth::GoogleOauth;
+
 const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3";
 
 pub struct GoogleDrive {
-    client_id: String,
-    client_secret: String,
-    refresh_token: String,
-    access_token: RefCell<Option<AccessToken>>,
-
     client: HttpClient,
-}
-
-struct AccessToken {
-    token: String,
-    expire_time: Instant,
+    oauth: GoogleOauth,
 }
 
 type ApiResult<T> = Result<T, HttpClientError<ApiError>>;
 
 impl GoogleDrive {
-    pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GenericResult<GoogleDrive> {
-        Ok(GoogleDrive {
-            client_id: client_id.to_owned(),
-            client_secret: client_secret.to_owned(),
-            refresh_token: refresh_token.to_owned(),
-            access_token: RefCell::new(None),
-
-            client: HttpClient::new()?,
-        })
+    pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GoogleDrive {
+        GoogleDrive {
+            client: HttpClient::new(),
+            oauth: GoogleOauth::new(client_id, client_secret, refresh_token),
+        }
     }
 
     // FIXME
@@ -180,73 +169,23 @@ impl GoogleDrive {
         Ok(files)
     }
 
-    fn access_token(&self) -> ApiResult<String> {
-        let mut access_token = self.access_token.borrow_mut();
-
-        if let Some(ref access_token) = *access_token {
-            let now = Instant::now();
-
-            if access_token.expire_time > now &&
-                access_token.expire_time.duration_since(now) > Duration::from_secs(1) // FIXME: Request timeout here?
-            {
-                return Ok(access_token.token.to_owned());
-            }
-        }
-
-        debug!("Obtaining a new Google Drive access token...");
-
-        #[derive(Serialize)]
-        struct Request<'a> {
-            client_id: &'a str,
-            client_secret: &'a str,
-            refresh_token: &'a str,
-            grant_type: &'a str,
-        }
-
-        #[derive(Deserialize)]
-        struct Response {
-            access_token: String,
-            expires_in: u64,
-        }
-
-        let request_time = Instant::now();
-
-        let response: Response = self.oauth_request("/token", &Request {
-            client_id: &self.client_id,
-            client_secret: &self.client_secret,
-            refresh_token: &self.refresh_token,
-            grant_type: "refresh_token",
-        }).map_err(HttpClientError::generic_from)?;
-
-        *access_token = Some(AccessToken {
-            token: response.access_token.to_owned(),
-            expire_time: request_time + Duration::from_secs(response.expires_in)
-        });
-
-        Ok(response.access_token)
-    }
-
-    // FIXME: name
-    fn oauth_request<I, O>(&self, path: &str, request: &I) -> Result<O, HttpClientError<OauthApiError>>
-        where I: ser::Serialize,
-              O: de::DeserializeOwned,
-    {
-        let url = OAUTH_ENDPOINT.to_owned() + path;
-        return self.client.form_request(&url, request, Duration::from_secs(5));
+    fn access_token(&self) -> GenericResult<String> {
+        self.oauth.get_access_token().map_err(|e| format!(
+            "Unable obtain a Google OAuth token: {}", e).into())
     }
 
     // FIXME
-    fn api_request<R>(&self, method: Method, path: &str) -> GenericResult<Request<R, ApiError>>
+    fn api_request<R>(&self, method: Method, path: &str) -> GenericResult<HttpRequest<R, ApiError>>
         where R: de::DeserializeOwned + 'static
     {
-        Ok(Request::new_json(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
+        Ok(HttpRequest::new_json(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     // FIXME + error type
-    fn upload_request(&self, method: Method, path: &str) -> GenericResult<Request<Response, ApiError>> {
-        Ok(Request::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5),
-                        RawResponseReader::new(), JsonErrorReader::new())
+    fn upload_request(&self, method: Method, path: &str) -> GenericResult<HttpRequest<HttpResponse, ApiError>> {
+        Ok(HttpRequest::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5),
+                            RawResponseReader::new(), JsonErrorReader::new())
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
@@ -354,7 +293,7 @@ impl WriteProvider for GoogleDrive {
         };
 
         // FIXME: error type
-        let request = Request::<_, ApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
+        let request = HttpRequest::<_, ApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
         let _: EmptyResponse = self.client.send(request)?; // FIXME: Send request?
 
         Ok(())
@@ -450,9 +389,10 @@ impl WriteProvider for GoogleDrive {
             path: &'a str,
         }
 
-        let _: EmptyResponse = self.oauth_request("/files/delete_v2", &Request {
-            path: path
-        })?;
+        unimplemented!();
+//        let _: EmptyResponse = self.oauth_request("/files/delete_v2", &Request {
+//            path: path
+//        })?;
 
         Ok(())
     }
@@ -499,22 +439,5 @@ impl Error for ApiError {
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.description(), self.error.message)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct OauthApiError {
-    error_description: String,
-}
-
-impl Error for OauthApiError {
-    fn description(&self) -> &str {
-        "Google OAuth error"
-    }
-}
-
-impl fmt::Display for OauthApiError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(), self.error_description)
     }
 }

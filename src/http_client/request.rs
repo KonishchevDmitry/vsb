@@ -10,12 +10,12 @@ use serde_urlencoded;
 use tokio_core::reactor::Timeout;
 
 use core::GenericResult;
-use super::{Method, Headers, StatusCode, Response, ResponseReader, RawResponseReader,
+use super::{Method, Headers, StatusCode, HttpResponse, ResponseReader, RawResponseReader,
             JsonReplyReader, JsonErrorReader, HttpClientError};
 
 // FIXME: pub?
 // FIXME: lifetimes
-pub struct Request<'a, R, E> {
+pub struct HttpRequest<'a, R, E> {
     pub method: Method,
     pub url: String,
     pub headers: Headers,
@@ -30,13 +30,13 @@ pub struct Request<'a, R, E> {
     pub error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
 
-impl<'a, R, E> Request<'a, R, E> {
+impl<'a, R, E> HttpRequest<'a, R, E> {
     pub fn new<RR, ER>(method: Method, url: String, timeout: Duration,
-                       reply_reader: RR, error_reader: ER) -> Request<'a, R, E>
+                       reply_reader: RR, error_reader: ER) -> HttpRequest<'a, R, E>
         where RR: ResponseReader<Result=R> + 'a,
               ER: ResponseReader<Result=E> + 'a
     {
-        Request {
+        HttpRequest {
             method: method,
             url: url.to_owned(),
             headers: Headers::new(),
@@ -52,7 +52,7 @@ impl<'a, R, E> Request<'a, R, E> {
         }
     }
 
-    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request<'a, R, E>> {
+    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<HttpRequest<'a, R, E>> {
         let query_string = serde_urlencoded::to_string(params)?;
 
         self.url += if self.url.contains('?') {
@@ -67,7 +67,7 @@ impl<'a, R, E> Request<'a, R, E> {
     }
 
     // FIXME: ::std::fmt::Display
-    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request<'a, R, E> {
+    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> HttpRequest<'a, R, E> {
         if trace {
             // FIXME
             self.trace_headers.push(header.to_string())
@@ -77,7 +77,7 @@ impl<'a, R, E> Request<'a, R, E> {
     }
 
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
-                                    body: B) -> GenericResult<Request<'a, R, E>> {
+                                    body: B) -> GenericResult<HttpRequest<'a, R, E>> {
         if self.body.is_some() {
             return Err!("An attempt to set request body twice")
         }
@@ -92,7 +92,7 @@ impl<'a, R, E> Request<'a, R, E> {
         Ok(self)
     }
 
-    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request<'a, R, E>> {
+    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<HttpRequest<'a, R, E>> {
         let content_length = Some(body.len() as u64);
 
         if log_enabled!(LogLevel::Trace) {
@@ -104,19 +104,19 @@ impl<'a, R, E> Request<'a, R, E> {
         }
     }
 
-    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> GenericResult<Request<'a, R, E>> {
+    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> GenericResult<HttpRequest<'a, R, E>> {
         let body = serde_urlencoded::to_string(request)?;
         Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
     }
 
-    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> GenericResult<Request<'a, R, E>> {
+    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> GenericResult<HttpRequest<'a, R, E>> {
         let body = serde_json::to_string(request)?;
         Ok(self.with_text_body(ContentType::json(), body)?)
     }
 }
 
-impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> Request<'a, R, E> {
-    pub fn new_json(method: Method, url: String, timeout: Duration) -> Request<'a, R, E> {
-        Request::new(method, url, timeout, JsonReplyReader::new(), JsonErrorReader::new())
+impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> HttpRequest<'a, R, E> {
+    pub fn new_json(method: Method, url: String, timeout: Duration) -> HttpRequest<'a, R, E> {
+        HttpRequest::new(method, url, timeout, JsonReplyReader::new(), JsonErrorReader::new())
     }
 }

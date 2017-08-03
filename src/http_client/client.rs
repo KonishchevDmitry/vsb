@@ -18,20 +18,20 @@ use tokio_core::reactor::{Core, Timeout};
 pub use hyper::{Method, Headers};
 
 use core::GenericResult;
-use super::{Request, Response, RawResponseReader};
+use super::{HttpRequest, HttpResponse, RawResponseReader};
 
 pub struct HttpClient {
     default_headers: Headers,
 }
 
 impl HttpClient {
-    pub fn new() -> GenericResult<HttpClient> {
+    pub fn new() -> HttpClient {
         let mut default_headers = Headers::new();
         default_headers.set(UserAgent::new("pyvsb-to-cloud"));
 
-        Ok(HttpClient {
+        HttpClient {
             default_headers: default_headers,
-        })
+        }
     }
 
     pub fn with_default_header<H: Header>(mut self, header: H) -> HttpClient {
@@ -40,24 +40,12 @@ impl HttpClient {
     }
 
     // FIXME: deprecate
-    pub fn form_request<I, O, E>(&self, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
-        where I: ser::Serialize,
-              O: de::DeserializeOwned,
-              E: de::DeserializeOwned + Error,
-    {
-        let request = Request::<O, E>::new_json(Method::Post, url.to_owned(), timeout).with_form(request)
-            .map_err(HttpClientError::generic_from)?;
-
-        self.send(request).map_err(HttpClientError::generic_from)
-    }
-
-    // FIXME: deprecate
     pub fn json_request<I, O, E>(&self, method: Method, url: &str, request: &I, timeout: Duration) -> Result<O, HttpClientError<E>>
         where I: ser::Serialize,
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let request = Request::<O, E>::new_json(method, url.to_owned(), timeout).with_json(request)
+        let request = HttpRequest::<O, E>::new_json(method, url.to_owned(), timeout).with_json(request)
             .map_err(HttpClientError::generic_from)?;
 
         self.send(request).map_err(HttpClientError::generic_from)
@@ -69,7 +57,7 @@ impl HttpClient {
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let mut request = Request::<O, E>::new_json(Method::Post, url.to_owned(), timeout)
+        let mut request = HttpRequest::<O, E>::new_json(Method::Post, url.to_owned(), timeout)
             .with_body(ContentType::octet_stream(), None, body)
             .map_err(HttpClientError::generic_from)?;
 
@@ -80,7 +68,7 @@ impl HttpClient {
     }
 
     // FIXME
-    pub fn send<R, E>(&self, request: Request<R, E>) -> Result<R, HttpClientError<E>> {
+    pub fn send<R, E>(&self, request: HttpRequest<R, E>) -> Result<R, HttpClientError<E>> {
         // FIXME
         if log_enabled!(LogLevel::Trace) {
             let mut extra_info = String::new();
@@ -117,7 +105,7 @@ impl HttpClient {
     }
 
     fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
-                       timeout: Duration) -> GenericResult<Response>
+                       timeout: Duration) -> GenericResult<HttpResponse>
         where I: Into<Body>
     {
         let url = url.parse()?;
@@ -163,7 +151,7 @@ impl HttpClient {
         let body = body.to_vec();
         trace!("Got {} response: {}", status, String::from_utf8_lossy(&body));
 
-        Ok(Response {
+        Ok(HttpResponse {
             status: status,
             headers: response_headers,
             body: body,

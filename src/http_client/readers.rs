@@ -6,12 +6,12 @@ use serde::de;
 use serde_json;
 
 use core::GenericResult;
-use super::response::Response;
+use super::response::HttpResponse;
 
 pub trait ResponseReader {
     type Result;
 
-    fn read(&self, response: Response) -> GenericResult<Self::Result>;
+    fn read(&self, response: HttpResponse) -> GenericResult<Self::Result>;
 }
 
 pub struct JsonReplyReader<T> {
@@ -29,7 +29,7 @@ impl<T: de::DeserializeOwned> JsonReplyReader<T> {
 impl<T: de::DeserializeOwned> ResponseReader for JsonReplyReader<T> {
     type Result = T;
 
-    fn read(&self, response: Response) -> GenericResult<Self::Result> {
+    fn read(&self, response: HttpResponse) -> GenericResult<Self::Result> {
         let content_type = response.headers.get::<ContentType>().ok_or_else(|| format!(
             "Server returned {} response without Content-Type", response.status))?;
 
@@ -54,7 +54,7 @@ impl<T: de::DeserializeOwned> JsonErrorReader<T> {
         }
     }
 
-    fn read_plain_text_error(&self, response: Response) -> String {
+    fn read_plain_text_error(&self, response: HttpResponse) -> String {
         if let Ok(body) = String::from_utf8(response.body) {
             let error = body.lines().next().unwrap_or("").trim_right_matches('.').trim();
             if !error.is_empty() {
@@ -69,7 +69,7 @@ impl<T: de::DeserializeOwned> JsonErrorReader<T> {
 impl<T: de::DeserializeOwned> ResponseReader for JsonErrorReader<T> {
     type Result = T;
 
-    fn read(&self, response: Response) -> GenericResult<Self::Result> {
+    fn read(&self, response: HttpResponse) -> GenericResult<Self::Result> {
         let content_type = response.headers.get::<ContentType>().map(Clone::clone).ok_or_else(|| format!(
             "Server returned {} error without Content-Type", response.status))?;
 
@@ -95,9 +95,9 @@ impl RawResponseReader {
 }
 
 impl ResponseReader for RawResponseReader {
-    type Result = Response;
+    type Result = HttpResponse;
 
-    fn read(&self, response: Response) -> GenericResult<Self::Result> {
+    fn read(&self, response: HttpResponse) -> GenericResult<Self::Result> {
         Ok(response)
     }
 }
