@@ -116,13 +116,11 @@ impl HttpClient {
         }
     }
 
-    // FIXME
     fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
-                       timeout: Duration
-    ) -> Result<Response, HttpClientError<String>> // FIXME: Error type
+                       timeout: Duration) -> GenericResult<Response>
         where I: Into<Body>
     {
-        let url = url.parse().map_err(HttpClientError::generic_from)?;
+        let url = url.parse()?;
 
         let mut http_request = hyper::Request::new(method, url);
         *http_request.headers_mut() = headers;
@@ -135,17 +133,15 @@ impl HttpClient {
         // so body's mpsc::Receiver doesn't gets closed and sender hangs on it forever.
         let mut core = Core::new()?;
         let handle = core.handle();
-        let https_connector = HttpsConnector::new(1, &handle).map_err(HttpClientError::generic_from)?;
-        let client =  Client::configure().connector(https_connector).build(&handle);
+        let https_connector = HttpsConnector::new(1, &handle)?;
+        let client = Client::configure().connector(https_connector).build(&handle);
 
         // Sadly, but for now it seems to be impossible to set socket or per-chunk timeout in hyper,
         // so we have to always operate with request timeout.
         let timeout_time = Instant::now() + timeout;
         let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP request timeout"))
-        }).map_err(|e| {
-            e.into()
-        });
+        }).map_err(Into::into);
 
         let response: hyper::Response = match core.run(client.request(http_request).select(timeout)) {
             Ok((response, _)) => Ok(response),
@@ -158,9 +154,7 @@ impl HttpClient {
 
         let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
             Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP response receiving timeout"))
-        }).map_err(|e| {
-            e.into()
-        });
+        }).map_err(Into::into);
 
         let body: Chunk = match core.run(response.body().concat2().select(timeout)) {
             Ok((body, _)) => Ok(body),
@@ -216,17 +210,5 @@ impl<T: fmt::Display> fmt::Display for HttpClientError<T> {
 impl<T> From<String> for HttpClientError<T> {
     fn from(err: String) -> HttpClientError<T> {
         HttpClientError::Generic(err)
-    }
-}
-
-impl<T> From<io::Error> for HttpClientError<T> {
-    fn from(err: io::Error) -> HttpClientError<T> {
-        HttpClientError::generic_from(err)
-    }
-}
-
-impl<T> From<hyper::Error> for HttpClientError<T> {
-    fn from(err: hyper::Error) -> HttpClientError<T> {
-        HttpClientError::generic_from(err)
     }
 }
