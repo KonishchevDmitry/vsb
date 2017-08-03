@@ -1,8 +1,11 @@
+use std::borrow::Cow;
+use std::error::Error;
+use std::fmt;
 use std::time::Duration;
 
 use futures::Stream;
 use hyper::Body;
-use hyper::header::{Header, ContentLength, ContentType};
+use hyper::header::{Header, Raw, ContentLength, ContentType};
 use log::LogLevel;
 use serde::{ser, de};
 use serde_json;
@@ -30,6 +33,8 @@ pub struct HttpRequest<'a, R, E> {
     pub error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
 
+pub type HttpRequestBuildingResult<'a, R, E> = Result<HttpRequest<'a, R, E>, HttpRequestBuildingError>;
+
 impl<'a, R, E> HttpRequest<'a, R, E> {
     pub fn new<RR, ER>(method: Method, url: String, timeout: Duration,
                        reply_reader: RR, error_reader: ER) -> HttpRequest<'a, R, E>
@@ -52,8 +57,9 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         }
     }
 
-    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<HttpRequest<'a, R, E>> {
-        let query_string = serde_urlencoded::to_string(params)?;
+    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> HttpRequestBuildingResult<'a, R, E> {
+        let query_string = serde_urlencoded::to_string(params)
+            .map_err(HttpRequestBuildingError::new)?;
 
         self.url += if self.url.contains('?') {
             "&"
@@ -76,10 +82,21 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         self
     }
 
+    pub fn with_raw_header<K: Into<Cow<'static, str>>, V: Into<Raw>>(mut self, name: K, value: V, trace: bool) -> HttpRequest<'a, R, E> {
+        let name = name.into();
+        let value = value.into();
+        if trace {
+            // FIXME
+            self.trace_headers.push(format!("{}: {:?}", name, value))
+        }
+        self.headers.set_raw(name, value);
+        self
+    }
+
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
-                                    body: B) -> GenericResult<HttpRequest<'a, R, E>> {
+                                    body: B) -> HttpRequestBuildingResult<'a, R, E> {
         if self.body.is_some() {
-            return Err!("An attempt to set request body twice")
+            return Err(HttpRequestBuildingError::new("An attempt to set request body twice"))
         }
 
         self.headers.set(content_type);
@@ -92,7 +109,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         Ok(self)
     }
 
-    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<HttpRequest<'a, R, E>> {
+    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> HttpRequestBuildingResult<'a, R, E> {
         let content_length = Some(body.len() as u64);
 
         if log_enabled!(LogLevel::Trace) {
@@ -104,13 +121,13 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         }
     }
 
-    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> GenericResult<HttpRequest<'a, R, E>> {
-        let body = serde_urlencoded::to_string(request)?;
+    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
+        let body = serde_urlencoded::to_string(request).map_err(HttpRequestBuildingError::new)?;
         Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
     }
 
-    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> GenericResult<HttpRequest<'a, R, E>> {
-        let body = serde_json::to_string(request)?;
+    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
+        let body = serde_json::to_string(request).map_err(HttpRequestBuildingError::new)?;
         Ok(self.with_text_body(ContentType::json(), body)?)
     }
 }
@@ -118,5 +135,26 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
 impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> HttpRequest<'a, R, E> {
     pub fn new_json(method: Method, url: String, timeout: Duration) -> HttpRequest<'a, R, E> {
         HttpRequest::new(method, url, timeout, JsonReplyReader::new(), JsonErrorReader::new())
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpRequestBuildingError(String);
+
+impl HttpRequestBuildingError {
+    pub fn new<E: ToString>(err: E) -> HttpRequestBuildingError {
+        HttpRequestBuildingError(err.to_string())
+    }
+}
+
+impl Error for HttpRequestBuildingError {
+    fn description(&self) -> &str {
+        "HTTP request building error"
+    }
+}
+
+impl fmt::Display for HttpRequestBuildingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.description(), self.0)
     }
 }

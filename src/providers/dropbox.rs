@@ -3,18 +3,22 @@ use std::fmt;
 use std::time::Duration;
 
 use hyper::Body;
-use hyper::header::{Authorization, Bearer, Headers};
+use hyper::header::{Authorization, Bearer, ContentType, Headers};
 use serde::{ser, de};
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, Method, EmptyResponse, HttpClientError};
+use http_client::{HttpClient, HttpRequest, HttpRequestBuildingError, Method, EmptyResponse,
+                  HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
+const API_REQUEST_TIMEOUT: u64 = 15;
+
 const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
+const CONTENT_REQUEST_TIMEOUT: u64 = 60 * 60;
 
 pub struct Dropbox {
     client: HttpClient,
@@ -47,8 +51,10 @@ impl Dropbox {
         where I: ser::Serialize,
               O: de::DeserializeOwned,
     {
-        let url = API_ENDPOINT.to_owned() + path;
-        return self.client.json_request(Method::Post, &url, request, Duration::from_secs(15));
+        self.client.send(HttpRequest::new_json(
+            Method::Post, API_ENDPOINT.to_owned() + path,
+            Duration::from_secs(API_REQUEST_TIMEOUT)
+        ).with_json(request)?)
     }
 
     fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<ApiError>>
@@ -56,13 +62,15 @@ impl Dropbox {
               B: Into<Body>,
               O: de::DeserializeOwned,
     {
-        let url = CONTENT_ENDPOINT.to_owned() + path;
-        let mut headers = Headers::new();
+        let request_json = serde_json::to_string(request).map_err(HttpRequestBuildingError::new)?;
 
-        let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
-        headers.set_raw("Dropbox-API-Arg", request_json);
+        let http_request = HttpRequest::new_json(
+            Method::Post, CONTENT_ENDPOINT.to_owned() + path,
+            Duration::from_secs(CONTENT_REQUEST_TIMEOUT))
+            .with_raw_header("Dropbox-API-Arg", request_json, true)
+            .with_body(ContentType::octet_stream(), None, body)?;
 
-        return self.client.upload_request(&url, &headers, body, Duration::from_secs(60 * 60));
+        self.client.send(http_request)
     }
 }
 
