@@ -11,7 +11,8 @@ use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, Method, Request, EmptyResponse, HttpClientError};
+use http_client::{HttpClient, Method, Request, Response, EmptyResponse, RawResponseReader,
+                  JsonErrorReader, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -83,7 +84,7 @@ impl GoogleDrive {
         if path == "/" {
             let request_path = "/files/".to_owned() + &cur_dir_id;
             let request = self.api_request(Method::Get, &request_path)?;
-            return Ok(Some(self.send_request(request)?));
+            return Ok(Some(self.client.send(request)?));
         } else if !path.starts_with('/') || path.ends_with('/') {
             return Err!("Invalid path: {:?}", path);
         }
@@ -154,7 +155,7 @@ impl GoogleDrive {
 
         loop {
             let request = self.api_request(Method::Get, "/files")?.with_params(&request_params)?;
-            let mut response: Response = self.send_request(request)?;
+            let mut response: Response = self.client.send(request)?;
 
             if response.incomplete_search {
                 return Err!("Got an incomplete result on directory listing")
@@ -235,35 +236,18 @@ impl GoogleDrive {
     }
 
     // FIXME
-    fn api_request(&self, method: Method, path: &str) -> ApiResult<Request> {
-        Ok(Request::new(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
-    }
-
-    // FIXME
-    fn upload_request(&self, method: Method, path: &str) -> ApiResult<Request> {
-        Ok(Request::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5))
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
-    }
-
-    // FIXME
-    fn send_request<R>(&self, request: Request) -> Result<R, HttpClientError<ApiError>>
-        where R: de::DeserializeOwned,
+    fn api_request<R>(&self, method: Method, path: &str) -> GenericResult<Request<R, ApiError>>
+        where R: de::DeserializeOwned + 'static
     {
-        // FIXME
-        unimplemented!()
-//        Ok(self.client.request(request)?)
+        Ok(Request::new_json(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
-    // FIXME
-    fn send_upload_request(&self, request: Request) -> GenericResult<(Headers, Vec<u8>)> {
-        let response = self.client.raw_request(request).map_err(|e| {
-            match e {
-                HttpClientError::Generic(e) => format!("{:?}", e),
-                HttpClientError::Api(response) => response.status.to_string(),
-            }
-        })?;
-        Ok((response.headers, response.body))
+    // FIXME + error type
+    fn upload_request(&self, method: Method, path: &str) -> GenericResult<Request<Response, ApiError>> {
+        Ok(Request::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5),
+                        RawResponseReader::new(), JsonErrorReader::new())
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     // FIXME
@@ -359,9 +343,9 @@ impl WriteProvider for GoogleDrive {
             parents: parents,
         })?;
 
-        let (headers, _) = self.send_upload_request(request)?;
+        let response = self.client.send(request)?;
 
-        let location = match headers.get::<Location>() {
+        let location = match response.headers.get::<Location>() {
             Some(location) => location,
             None => return Err!(concat!(
                 "Got an invalid response from Google Drive API: ",
@@ -369,8 +353,9 @@ impl WriteProvider for GoogleDrive {
             )),
         };
 
-        let request = Request::new(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
-        let _: EmptyResponse = self.send_request(request)?; // FIXME: Send request?
+        // FIXME: error type
+        let request = Request::<_, ApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
+        let _: EmptyResponse = self.client.send(request)?; // FIXME: Send request?
 
         Ok(())
     }

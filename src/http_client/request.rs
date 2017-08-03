@@ -14,22 +14,28 @@ use super::{Method, Headers, StatusCode, Response, ResponseReader, RawResponseRe
             JsonReplyReader, JsonErrorReader, HttpClientError};
 
 // FIXME: pub?
-pub struct Request<'a> {
+// FIXME: lifetimes
+pub struct Request<'a, R, E> {
     pub method: Method,
     pub url: String,
     pub headers: Headers,
     pub body: Option<Body>,
-    pub timeout: Duration,
+    pub timeout: Duration, // FIXME: default timeout / default headers?
 
     pub trace_headers: Vec<String>,
     pub trace_body: Option<String>,
 
-    // FIXME
-    pub new_request: NewRequest<'a, Response, Response>,
+    // FIXME: private
+    pub reply_reader: Box<ResponseReader<Result=R> + 'a>,
+    pub error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
 
-impl<'a> Request<'a> {
-    pub fn new(method: Method, url: String, timeout: Duration) -> Request<'a> {
+impl<'a, R, E> Request<'a, R, E> {
+    pub fn new<RR, ER>(method: Method, url: String, timeout: Duration,
+                       reply_reader: RR, error_reader: ER) -> Request<'a, R, E>
+        where RR: ResponseReader<Result=R> + 'a,
+              ER: ResponseReader<Result=E> + 'a
+    {
         Request {
             method: method,
             url: url.to_owned(),
@@ -41,11 +47,12 @@ impl<'a> Request<'a> {
             trace_headers: Vec::new(),
             trace_body: None,
 
-            new_request: NewRequest::new(RawResponseReader::new(), RawResponseReader::new()),
+            reply_reader: Box::new(reply_reader),
+            error_reader: Box::new(error_reader),
         }
     }
 
-    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request<'a>> {
+    pub fn with_params<P: ser::Serialize>(mut self, params: &P) -> GenericResult<Request<'a, R, E>> {
         let query_string = serde_urlencoded::to_string(params)?;
 
         self.url += if self.url.contains('?') {
@@ -60,7 +67,7 @@ impl<'a> Request<'a> {
     }
 
     // FIXME: ::std::fmt::Display
-    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request<'a> {
+    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> Request<'a, R, E> {
         if trace {
             // FIXME
             self.trace_headers.push(header.to_string())
@@ -70,7 +77,7 @@ impl<'a> Request<'a> {
     }
 
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
-                                    body: B) -> GenericResult<Request<'a>> {
+                                    body: B) -> GenericResult<Request<'a, R, E>> {
         if self.body.is_some() {
             return Err!("An attempt to set request body twice")
         }
@@ -85,7 +92,7 @@ impl<'a> Request<'a> {
         Ok(self)
     }
 
-    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request<'a>> {
+    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> GenericResult<Request<'a, R, E>> {
         let content_length = Some(body.len() as u64);
 
         if log_enabled!(LogLevel::Trace) {
@@ -97,50 +104,19 @@ impl<'a> Request<'a> {
         }
     }
 
-    pub fn with_form<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request<'a>> {
+    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> GenericResult<Request<'a, R, E>> {
         let body = serde_urlencoded::to_string(request)?;
         Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
     }
 
-    pub fn with_json<R: ser::Serialize>(mut self, request: &R) -> GenericResult<Request<'a>> {
+    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> GenericResult<Request<'a, R, E>> {
         let body = serde_json::to_string(request)?;
         Ok(self.with_text_body(ContentType::json(), body)?)
     }
 }
 
-// FIXME
-// FIXME: lifetimes
-pub struct NewRequest<'a, R, E> {
-    // FIXME: private
-    pub reply_reader: Box<ResponseReader<Result=R> + 'a>,
-    pub error_reader: Box<ResponseReader<Result=E> + 'a>,
-}
-
-impl<'a, R, E> NewRequest<'a, R, E> {
-    pub fn new<RR, ER>(reply_reader: RR, error_reader: ER) -> NewRequest<'a, R, E>
-        where RR: ResponseReader<Result=R> + 'a,
-              ER: ResponseReader<Result=E> + 'a
-    {
-        NewRequest {
-            reply_reader: Box::new(reply_reader),
-            error_reader: Box::new(error_reader),
-        }
-    }
-
-    pub fn get_result(&self, response: Response) -> Result<R, HttpClientError<E>> {
-        if response.status.is_success() {
-            Ok(self.reply_reader.read(response).map_err(HttpClientError::generic_from)?)
-        } else if response.status.is_client_error() || response.status.is_server_error() {
-            Err(HttpClientError::Api(
-                self.error_reader.read(response).map_err(HttpClientError::generic_from)?))
-        } else {
-            Err!("Server returned an error: {}", response.status)
-        }
-    }
-}
-
-impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> NewRequest<'a, R, E> {
-    pub fn new_json() -> NewRequest<'a, R, E> {
-        NewRequest::new(JsonReplyReader::new(), JsonErrorReader::new())
+impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> Request<'a, R, E> {
+    pub fn new_json(method: Method, url: String, timeout: Duration) -> Request<'a, R, E> {
+        Request::new(method, url, timeout, JsonReplyReader::new(), JsonErrorReader::new())
     }
 }

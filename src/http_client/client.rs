@@ -18,7 +18,7 @@ use tokio_core::reactor::{Core, Timeout};
 pub use hyper::{Method, Headers};
 
 use core::GenericResult;
-use super::{Request, NewRequest, Response, RawResponseReader};
+use super::{Request, Response, RawResponseReader};
 
 pub struct HttpClient {
     default_headers: Headers,
@@ -45,10 +45,10 @@ impl HttpClient {
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let request = Request::new(Method::Post, url.to_owned(), timeout).with_form(request)
+        let request = Request::<O, E>::new_json(Method::Post, url.to_owned(), timeout).with_form(request)
             .map_err(HttpClientError::generic_from)?;
 
-        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
+        self.send(request).map_err(HttpClientError::generic_from)
     }
 
     // FIXME: deprecate
@@ -57,10 +57,10 @@ impl HttpClient {
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let request = Request::new(method, url.to_owned(), timeout).with_json(request)
+        let request = Request::<O, E>::new_json(method, url.to_owned(), timeout).with_json(request)
             .map_err(HttpClientError::generic_from)?;
 
-        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
+        self.send(request).map_err(HttpClientError::generic_from)
     }
 
     // FIXME: deprecate
@@ -69,25 +69,18 @@ impl HttpClient {
               O: de::DeserializeOwned,
               E: de::DeserializeOwned + Error,
     {
-        let mut request = Request::new(Method::Post, url.to_owned(), timeout)
+        let mut request = Request::<O, E>::new_json(Method::Post, url.to_owned(), timeout)
             .with_body(ContentType::octet_stream(), None, body)
             .map_err(HttpClientError::generic_from)?;
 
         // FIXME: trace
         request.headers.extend(headers.iter());
 
-        NewRequest::new_json().get_result(self.send(request).map_err(HttpClientError::generic_from)?)
-    }
-
-    // FIXME: deprecate
-    pub fn raw_request(&self, request: Request) -> Result<Response, HttpClientError<Response>> // FIXME: Error type
-    {
-        NewRequest::new(RawResponseReader::new(), RawResponseReader::new())
-            .get_result(self.send(request).map_err(HttpClientError::generic_from)?)
+        self.send(request).map_err(HttpClientError::generic_from)
     }
 
     // FIXME
-    fn send(&self, request: Request) -> Result<Response, HttpClientError<String>> { // FIXME: Error type
+    pub fn send<R, E>(&self, request: Request<R, E>) -> Result<R, HttpClientError<E>> {
         // FIXME
         if log_enabled!(LogLevel::Trace) {
             let mut extra_info = String::new();
@@ -109,10 +102,18 @@ impl HttpClient {
         let mut headers = self.default_headers.clone();
         headers.extend(request.headers.iter());
 
-        let reply_reader = request.new_request.reply_reader;
-        let error_reader = request.new_request.error_reader;
+        let response = self.send_request(
+            request.method, &request.url, headers, request.body, request.timeout)
+            .map_err(HttpClientError::generic_from)?; // FIXME
 
-        self.send_request(request.method, &request.url, headers, request.body, request.timeout)
+        if response.status.is_success() {
+            Ok(request.reply_reader.read(response).map_err(HttpClientError::generic_from)?)
+        } else if response.status.is_client_error() || response.status.is_server_error() {
+            Err(HttpClientError::Api(
+                request.error_reader.read(response).map_err(HttpClientError::generic_from)?))
+        } else {
+            Err!("Server returned an error: {}", response.status)
+        }
     }
 
     // FIXME
