@@ -91,6 +91,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
 
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
                                     body: B) -> HttpRequestBuildingResult<'a, R, E> {
+        // FIXME: panic?
         if self.body.is_some() {
             return Err(HttpRequestBuildingError::new("An attempt to set request body twice"))
         }
@@ -105,7 +106,8 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         Ok(self)
     }
 
-    pub fn with_text_body(mut self, content_type: ContentType, body: String) -> HttpRequestBuildingResult<'a, R, E> {
+    pub fn with_text_body<B: Into<String>>(mut self, content_type: ContentType, body: B) -> HttpRequestBuildingResult<'a, R, E> {
+        let body = body.into();
         let content_length = Some(body.len() as u64);
 
         if log_enabled!(LogLevel::Trace) {

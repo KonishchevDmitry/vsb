@@ -85,6 +85,23 @@ impl<T: de::DeserializeOwned> ResponseReader for JsonErrorReader<T> {
     }
 }
 
+pub struct HttpStatusReader {
+}
+
+impl HttpStatusReader {
+    pub fn new() -> HttpStatusReader {
+        HttpStatusReader {}
+    }
+}
+
+impl ResponseReader for HttpStatusReader {
+    type Result = String;
+
+    fn read(&self, response: HttpResponse) -> GenericResult<Self::Result> {
+        Ok(response.status.to_string())
+    }
+}
+
 pub struct RawResponseReader {
 }
 

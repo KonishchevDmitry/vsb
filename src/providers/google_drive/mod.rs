@@ -2,17 +2,19 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use hyper::Body;
-use hyper::header::{Authorization, Bearer, Location, Headers};
+use hyper::header::{Authorization, Bearer, Location, Headers, ContentType};
+use mime::Mime;
 use serde::{ser, de};
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
 use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyResponse, RawResponseReader,
-                  JsonErrorReader, HttpClientError};
+                  JsonErrorReader, HttpStatusReader, HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -185,11 +187,41 @@ impl GoogleDrive {
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
-    // FIXME + error type
-    fn upload_request(&self, method: Method, path: &str) -> GenericResult<HttpRequest<HttpResponse, GoogleDriveApiError>> {
-        Ok(HttpRequest::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5),
-                            RawResponseReader::new(), JsonErrorReader::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
+    fn start_file_upload(&self, path: &str, mime_type: &str) -> GenericResult<String> {
+        let (parent_id, name) = self.new_file(path)?;
+
+        #[derive(Serialize)]
+        struct Request<'a> {
+            name: &'a str,
+            #[serde(rename = "mimeType")]
+            mime_type: &'a str,
+            parents: Vec<String>,
+        }
+
+        let request = HttpRequest::new(
+            Method::Post, UPLOAD_ENDPOINT.to_owned() + "/files?uploadType=resumable",
+            Duration::from_secs(API_REQUEST_TIMEOUT),
+            RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false)
+            .with_json(&Request {
+                name: &name,
+                mime_type: DIRECTORY_MIME_TYPE,
+                parents: vec![parent_id],
+            })?;
+
+        let location = match self.client.send(request)?.headers.get::<Location>() {
+            Some(location) => location.to_string(),
+            None => return Err!(concat!(
+                "Got an invalid response from Google Drive API: ",
+                "upload session has been created, but session URI hasn't been returned"
+            )),
+        };
+
+        Ok(location)
+    }
+
+    fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
+        HttpRequest::new_json(Method::Put, location, Duration::from_secs(timeout))
     }
 
     // FIXME
@@ -262,39 +294,10 @@ impl WriteProvider for GoogleDrive {
 
     // FIXME
     fn create_directory(&self, path: &str) -> EmptyResult {
-        #[derive(Serialize)]
-        struct CreateRequest<'a> {
-            name: &'a str,
-            #[serde(rename = "mimeType")]
-            mime_type: &'a str,
-            parents: Vec<String>,
-        }
-
-        let (parent_id, name) = self.new_file(path)?;
-
-        let mut parents = Vec::new();
-        parents.push(parent_id);
-
-        let request = self.upload_request(Method::Post, "/files?uploadType=resumable")?.with_json(&CreateRequest {
-            name: &name,
-            mime_type: DIRECTORY_MIME_TYPE,
-            parents: parents,
-        })?;
-
-        let response = self.client.send(request)?;
-
-        let location = match response.headers.get::<Location>() {
-            Some(location) => location,
-            None => return Err!(concat!(
-                "Got an invalid response from Google Drive API: ",
-                "upload session has been created, but session URI hasn't been returned"
-            )),
-        };
-
-        // FIXME: error type
-        let request = HttpRequest::<_, GoogleDriveApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
-        let _: EmptyResponse = self.client.send(request)?; // FIXME: Send request?
-
+        let location = self.start_file_upload(path, DIRECTORY_MIME_TYPE)?;
+        let request = self.file_upload_request(location.to_string(), API_REQUEST_TIMEOUT)
+            .with_text_body(ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap()), "")?; // FIXME: unwrap
+        self.client.send(request)?;
         Ok(())
     }
 
@@ -453,11 +456,11 @@ impl From<HttpClientError<GoogleDriveApiError>> for GoogleDriveError {
 
 #[derive(Debug, Deserialize)]
 struct GoogleDriveApiError {
-    error: ApiErrorObject,
+    error: GoogleDriveApiErrorObject,
 }
 
 #[derive(Debug, Deserialize)]
-struct ApiErrorObject {
+struct GoogleDriveApiErrorObject {
     message: String,
 }
 
