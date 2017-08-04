@@ -30,7 +30,9 @@ pub type ChunkStreamReceiver = mpsc::Receiver<Result<ChunkStream, String>>;
 pub type ChunkReceiver = futures_mpsc::Receiver<ChunkResult>;
 pub type ChunkResult = Result<Chunk, hyper::Error>;
 
-pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)> {
+pub fn split(data_stream: DataReceiver, stream_max_size: Option<u64>)
+    -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)>
+{
     let (streams_tx, streams_rx) = mpsc::sync_channel(0);
 
     let splitter_thread = util::spawn_thread("stream splitter", move || {
@@ -40,7 +42,8 @@ pub fn split(data_stream: DataReceiver, stream_max_size: u64) -> GenericResult<(
     Ok((streams_rx, splitter_thread))
 }
 
-fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_max_size: u64) -> Result<(), StreamSplitterError> {
+fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
+            stream_max_size: Option<u64>) -> Result<(), StreamSplitterError> {
     let mut chunk_stream = None;
     let mut stream_size: u64 = 0;
     let mut offset: u64 = 0;
@@ -84,7 +87,10 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender, stream_
                 chunk_streams.send(Ok(ChunkStream::Stream(offset, rx)))?;
             }
 
-            let available_size = stream_max_size - stream_size;
+            let available_size = match stream_max_size {
+                Some(stream_max_size) => stream_max_size - stream_size,
+                None => data_size,
+            };
 
             if available_size >= data_size {
                 chunk_stream = Some(chunk_stream.unwrap().send(Ok(data.into())).wait()?);

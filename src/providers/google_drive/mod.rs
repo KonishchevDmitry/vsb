@@ -204,7 +204,7 @@ impl GoogleDrive {
                 parents: vec![parent_id],
             })?;
 
-        let location = match self.client.send(request)?.headers.get::<Location>() {
+        let upload_url = match self.client.send(request)?.headers.get::<Location>() {
             Some(location) => location.to_string(),
             None => return Err!(concat!(
                 "Got an invalid response from Google Drive API: ",
@@ -212,7 +212,7 @@ impl GoogleDrive {
             )),
         };
 
-        Ok(location)
+        Ok(upload_url)
     }
 
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
@@ -271,16 +271,14 @@ impl WriteProvider for GoogleDrive {
         Box::new(ChunkedSha256::new(4 * 1024 * 1024))
     }
 
-    // FIXME
-    fn max_request_size(&self) -> u64 {
-        150 * 1024 * 1024
+    fn max_request_size(&self) -> Option<u64> {
+        None
     }
 
-    // FIXME
     fn create_directory(&self, path: &str) -> EmptyResult {
-        let location = self.start_file_upload(path, DIRECTORY_MIME_TYPE)?;
-        let request = self.file_upload_request(location, API_REQUEST_TIMEOUT)
-            .with_text_body(ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap()), "")?; // FIXME: unwrap
+        let upload_url = self.start_file_upload(path, DIRECTORY_MIME_TYPE)?;
+        let request = self.file_upload_request(upload_url, API_REQUEST_TIMEOUT)
+            .with_text_body(ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap()), "")?;
         self.client.send(request)?;
         Ok(())
     }
