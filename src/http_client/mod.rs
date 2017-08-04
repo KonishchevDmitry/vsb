@@ -1,14 +1,6 @@
-// FIXME
-
-pub mod response;
-pub mod request;
-
 mod readers;
-
-pub use hyper::StatusCode;
-pub use self::request::{HttpRequest, HttpRequestBuildingError};
-pub use self::response::HttpResponse;
-pub use self::readers::*;
+mod request;
+mod response;
 
 use std::error::Error;
 use std::fmt;
@@ -22,10 +14,12 @@ use hyper_tls::HttpsConnector;
 use log::LogLevel;
 use tokio_core::reactor::{Core, Timeout};
 
-// FIXME
-pub use hyper::{Method, Headers};
-
 use core::GenericResult;
+
+pub use hyper::{Method, Headers, StatusCode};
+pub use self::request::*;
+pub use self::response::*;
+pub use self::readers::*;
 
 pub struct HttpClient {
     default_headers: Headers,

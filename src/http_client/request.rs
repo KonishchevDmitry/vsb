@@ -106,7 +106,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         Ok(self)
     }
 
-    pub fn with_text_body<B: Into<String>>(mut self, content_type: ContentType, body: B) -> HttpRequestBuildingResult<'a, R, E> {
+    pub fn with_text_body<B: Into<String>>(self, content_type: ContentType, body: B) -> HttpRequestBuildingResult<'a, R, E> {
         let body = body.into();
         let content_length = Some(body.len() as u64);
 
@@ -119,12 +119,12 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         }
     }
 
-    pub fn with_form<B: ser::Serialize>(mut self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
+    pub fn with_form<B: ser::Serialize>(self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
         let body = serde_urlencoded::to_string(request).map_err(HttpRequestBuildingError::new)?;
         Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
     }
 
-    pub fn with_json<B: ser::Serialize>(mut self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
+    pub fn with_json<B: ser::Serialize>(self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
         let body = serde_json::to_string(request).map_err(HttpRequestBuildingError::new)?;
         Ok(self.with_text_body(ContentType::json(), body)?)
     }

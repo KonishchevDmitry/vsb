@@ -1,22 +1,19 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use hyper::Body;
-use hyper::header::{Authorization, Bearer, Location, Headers, ContentType};
+use hyper::header::{Authorization, Bearer, Location, ContentType};
 use mime::Mime;
-use serde::{ser, de};
-use serde_json;
+use serde::de;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyResponse, RawResponseReader,
-                  JsonErrorReader, HttpStatusReader, HttpClientError};
+use http_client::{HttpClient, Method, HttpRequest, RawResponseReader, JsonErrorReader,
+                  HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use stream_splitter::{ChunkStreamReceiver, ChunkStream};
+use stream_splitter::ChunkStreamReceiver;
 
 mod oauth;
 use self::oauth::GoogleOauth;
@@ -30,8 +27,6 @@ pub struct GoogleDrive {
     client: HttpClient,
     oauth: GoogleOauth,
 }
-
-type ApiResult<T> = Result<T, HttpClientError<GoogleDriveApiError>>;
 
 impl GoogleDrive {
     pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GoogleDrive {
@@ -205,7 +200,7 @@ impl GoogleDrive {
             .with_header(Authorization(Bearer {token: self.access_token()?}), false)
             .with_json(&Request {
                 name: &name,
-                mime_type: DIRECTORY_MIME_TYPE,
+                mime_type: mime_type,
                 parents: vec![parent_id],
             })?;
 
@@ -222,17 +217,6 @@ impl GoogleDrive {
 
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
         HttpRequest::new_json(Method::Put, location, Duration::from_secs(timeout))
-    }
-
-    // FIXME
-    fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<GoogleDriveApiError>>
-        where I: ser::Serialize,
-              B: Into<Body>,
-              O: de::DeserializeOwned,
-    {
-        let url = UPLOAD_ENDPOINT.to_owned() + path;
-        let mut headers = Headers::new();
-        unreachable!();
     }
 }
 
@@ -295,108 +279,109 @@ impl WriteProvider for GoogleDrive {
     // FIXME
     fn create_directory(&self, path: &str) -> EmptyResult {
         let location = self.start_file_upload(path, DIRECTORY_MIME_TYPE)?;
-        let request = self.file_upload_request(location.to_string(), API_REQUEST_TIMEOUT)
+        let request = self.file_upload_request(location, API_REQUEST_TIMEOUT)
             .with_text_body(ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap()), "")?; // FIXME: unwrap
         self.client.send(request)?;
         Ok(())
     }
 
     // FIXME
-    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        #[derive(Serialize)]
-        struct StartRequest {
-        }
-
-        #[derive(Deserialize)]
-        struct StartResponse {
-            session_id: String,
-        }
-
-        #[derive(Serialize)]
-        struct AppendRequest<'a> {
-            cursor: Cursor<'a>,
-        }
-
-        #[derive(Serialize)]
-        struct FinishRequest<'a> {
-            cursor: Cursor<'a>,
-            commit: Commit<'a>,
-        }
-
-        #[derive(Deserialize)]
-        struct FinishResponse {
-            content_hash: String,
-        }
-
-        #[derive(Serialize)]
-        struct Cursor<'a> {
-            session_id: &'a str,
-            offset: u64,
-        }
-
-        #[derive(Serialize)]
-        struct Commit<'a> {
-            path: &'a str,
-            mode: &'a str,
-        }
-
-        let start_response: StartResponse = self.content_request(
-            "/files/upload_session/start", &StartRequest{}, "")?;
-
-        for result in chunk_streams.iter() {
-            match result {
-                Ok(ChunkStream::Stream(offset, chunk_stream)) => {
-                    let _: Option<EmptyResponse> = self.content_request(
-                        "/files/upload_session/append_v2", &AppendRequest {
-                            cursor: Cursor {
-                                session_id: &start_response.session_id,
-                                offset: offset,
-                            },
-                        }, chunk_stream)?;
-                },
-                Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
-                    let finish_response: FinishResponse = self.content_request(
-                        "/files/upload_session/finish", &FinishRequest {
-                            cursor: Cursor {
-                                session_id: &start_response.session_id,
-                                offset: size,
-                            },
-                            commit: Commit {
-                                path: temp_path,
-                                mode: "overwrite",
-                            },
-                        }, "")?;
-
-                    if finish_response.content_hash != checksum {
-                        if let Err(err) = self.delete(temp_path) {
-                            error!("Failed to delete a temporary {:?} file from {}: {}.",
-                                temp_path, self.name(), err);
-                        }
-                        return Err("Checksum mismatch".into());
-                    }
-
-                    return Ok(())
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
-
-        Err!("Chunk stream sender has been closed without a termination message")
+    fn upload_file(&self, _temp_path: &str, _path: &str, _chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+        unimplemented!()
+//        #[derive(Serialize)]
+//        struct StartRequest {
+//        }
+//
+//        #[derive(Deserialize)]
+//        struct StartResponse {
+//            session_id: String,
+//        }
+//
+//        #[derive(Serialize)]
+//        struct AppendRequest<'a> {
+//            cursor: Cursor<'a>,
+//        }
+//
+//        #[derive(Serialize)]
+//        struct FinishRequest<'a> {
+//            cursor: Cursor<'a>,
+//            commit: Commit<'a>,
+//        }
+//
+//        #[derive(Deserialize)]
+//        struct FinishResponse {
+//            content_hash: String,
+//        }
+//
+//        #[derive(Serialize)]
+//        struct Cursor<'a> {
+//            session_id: &'a str,
+//            offset: u64,
+//        }
+//
+//        #[derive(Serialize)]
+//        struct Commit<'a> {
+//            path: &'a str,
+//            mode: &'a str,
+//        }
+//
+//        let start_response: StartResponse = self.content_request(
+//            "/files/upload_session/start", &StartRequest{}, "")?;
+//
+//        for result in chunk_streams.iter() {
+//            match result {
+//                Ok(ChunkStream::Stream(offset, chunk_stream)) => {
+//                    let _: Option<EmptyResponse> = self.content_request(
+//                        "/files/upload_session/append_v2", &AppendRequest {
+//                            cursor: Cursor {
+//                                session_id: &start_response.session_id,
+//                                offset: offset,
+//                            },
+//                        }, chunk_stream)?;
+//                },
+//                Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
+//                    let finish_response: FinishResponse = self.content_request(
+//                        "/files/upload_session/finish", &FinishRequest {
+//                            cursor: Cursor {
+//                                session_id: &start_response.session_id,
+//                                offset: size,
+//                            },
+//                            commit: Commit {
+//                                path: temp_path,
+//                                mode: "overwrite",
+//                            },
+//                        }, "")?;
+//
+//                    if finish_response.content_hash != checksum {
+//                        if let Err(err) = self.delete(temp_path) {
+//                            error!("Failed to delete a temporary {:?} file from {}: {}.",
+//                                temp_path, self.name(), err);
+//                        }
+//                        return Err("Checksum mismatch".into());
+//                    }
+//
+//                    return Ok(())
+//                }
+//                Err(err) => return Err(err.into()),
+//            }
+//        }
+//
+//        Err!("Chunk stream sender has been closed without a termination message")
     }
 
     // FIXME
-    fn delete(&self, path: &str) -> EmptyResult {
-        #[derive(Serialize)]
-        struct Request<'a> {
-            path: &'a str,
-        }
-
+    fn delete(&self, _path: &str) -> EmptyResult {
         unimplemented!();
+//        #[derive(Serialize)]
+//        struct Request<'a> {
+//            path: &'a str,
+//        }
+//
 //        let _: EmptyResponse = self.oauth_request("/files/delete_v2", &Request {
 //            path: path
 //        })?;
-
-        Ok(())
+//
+//        Ok(())
     }
 }
 
@@ -424,7 +409,7 @@ impl GoogleDriveFile {
 
 // FIXME: Do we need it?
 #[derive(Debug)]
-pub enum GoogleDriveError {
+enum GoogleDriveError {
     Oauth(String),
     Api(HttpClientError<GoogleDriveApiError>),
 }
