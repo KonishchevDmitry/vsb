@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 use hyper::Body;
-use hyper::header::{Authorization, Bearer, ContentType, Headers};
+use hyper::header::{Authorization, Bearer, ContentType};
 use serde::{ser, de};
 use serde_json;
 

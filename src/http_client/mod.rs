@@ -17,13 +17,9 @@ use std::time::{Instant, Duration};
 
 use futures::{Future, Stream};
 use hyper::{self, Client, Body, Chunk};
-use hyper::header::{Header, UserAgent, ContentLength, ContentType};
+use hyper::header::{Header, UserAgent};
 use hyper_tls::HttpsConnector;
 use log::LogLevel;
-use mime;
-use serde::{ser, de};
-use serde_json;
-use serde_urlencoded;
 use tokio_core::reactor::{Core, Timeout};
 
 // FIXME
@@ -48,22 +44,6 @@ impl HttpClient {
     pub fn with_default_header<H: Header>(mut self, header: H) -> HttpClient {
         self.default_headers.set(header);
         self
-    }
-
-    // FIXME: deprecate
-    pub fn upload_request<I, O, E>(&self, url: &str, headers: &Headers, body: I, timeout: Duration) -> Result<O, HttpClientError<E>>
-        where I: Into<Body>,
-              O: de::DeserializeOwned,
-              E: de::DeserializeOwned + Error,
-    {
-        let mut request = HttpRequest::<O, E>::new_json(Method::Post, url.to_owned(), timeout)
-            .with_body(ContentType::octet_stream(), None, body)
-            .map_err(HttpClientError::generic_from)?;
-
-        // FIXME: trace
-        request.headers.extend(headers.iter());
-
-        self.send(request).map_err(HttpClientError::generic_from)
     }
 
     // FIXME

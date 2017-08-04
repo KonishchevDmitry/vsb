@@ -3,18 +3,14 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use futures::Stream;
 use hyper::Body;
 use hyper::header::{Header, Raw, ContentLength, ContentType};
 use log::LogLevel;
 use serde::{ser, de};
 use serde_json;
 use serde_urlencoded;
-use tokio_core::reactor::Timeout;
 
-use core::GenericResult;
-use super::{Method, Headers, StatusCode, HttpResponse, ResponseReader, RawResponseReader,
-            JsonReplyReader, JsonErrorReader, HttpClientError};
+use super::{Method, Headers, ResponseReader, JsonReplyReader, JsonErrorReader};
 
 // FIXME: pub?
 // FIXME: lifetimes

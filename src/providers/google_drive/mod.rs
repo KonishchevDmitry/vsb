@@ -20,6 +20,8 @@ mod oauth;
 use self::oauth::GoogleOauth;
 
 const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
+const API_REQUEST_TIMEOUT: u64 = 5;
+
 const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3";
 
 pub struct GoogleDrive {
@@ -27,7 +29,7 @@ pub struct GoogleDrive {
     oauth: GoogleOauth,
 }
 
-type ApiResult<T> = Result<T, HttpClientError<ApiError>>;
+type ApiResult<T> = Result<T, HttpClientError<GoogleDriveApiError>>;
 
 impl GoogleDrive {
     pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GoogleDrive {
@@ -72,8 +74,8 @@ impl GoogleDrive {
 
         if path == "/" {
             let request_path = "/files/".to_owned() + &cur_dir_id;
-            let request = self.api_request(Method::Get, &request_path)?;
-            return Ok(Some(self.client.send(request)?));
+            let file_metadata = self.client.send(self.api_request(Method::Get, &request_path)?)?;
+            return Ok(Some(file_metadata));
         } else if !path.starts_with('/') || path.ends_with('/') {
             return Err!("Invalid path: {:?}", path);
         }
@@ -169,39 +171,36 @@ impl GoogleDrive {
         Ok(files)
     }
 
-    fn access_token(&self) -> GenericResult<String> {
-        self.oauth.get_access_token().map_err(|e| format!(
-            "Unable obtain a Google OAuth token: {}", e).into())
+    fn access_token(&self) -> Result<String, GoogleDriveError> {
+        self.oauth.get_access_token().map_err(|e| GoogleDriveError::Oauth(format!(
+            "Unable obtain a Google OAuth token: {}", e)))
     }
 
-    // FIXME
-    fn api_request<R>(&self, method: Method, path: &str) -> GenericResult<HttpRequest<R, ApiError>>
+    fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>
         where R: de::DeserializeOwned + 'static
     {
-        Ok(HttpRequest::new_json(method, API_ENDPOINT.to_owned() + path, Duration::from_secs(5))
+        Ok(HttpRequest::new_json(
+            method, API_ENDPOINT.to_owned() + path,
+            Duration::from_secs(API_REQUEST_TIMEOUT))
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     // FIXME + error type
-    fn upload_request(&self, method: Method, path: &str) -> GenericResult<HttpRequest<HttpResponse, ApiError>> {
+    fn upload_request(&self, method: Method, path: &str) -> GenericResult<HttpRequest<HttpResponse, GoogleDriveApiError>> {
         Ok(HttpRequest::new(method, UPLOAD_ENDPOINT.to_owned() + path, Duration::from_secs(5),
                             RawResponseReader::new(), JsonErrorReader::new())
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
     // FIXME
-    fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<ApiError>>
+    fn content_request<I, B, O>(&self, path: &str, request: &I, body: B) -> Result<O, HttpClientError<GoogleDriveApiError>>
         where I: ser::Serialize,
               B: Into<Body>,
               O: de::DeserializeOwned,
     {
         let url = UPLOAD_ENDPOINT.to_owned() + path;
         let mut headers = Headers::new();
-
-        let request_json = serde_json::to_string(request).map_err(HttpClientError::generic_from)?;
-        headers.set_raw("Dropbox-API-Arg", request_json);
-
-        return self.client.upload_request(&url, &headers, body, Duration::from_secs(60 * 60));
+        unreachable!();
     }
 }
 
@@ -293,7 +292,7 @@ impl WriteProvider for GoogleDrive {
         };
 
         // FIXME: error type
-        let request = HttpRequest::<_, ApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
+        let request = HttpRequest::<_, GoogleDriveApiError>::new_json(Method::Put, location.to_string(), Duration::from_secs(60)); // FIXME: timeout
         let _: EmptyResponse = self.client.send(request)?; // FIXME: Send request?
 
         Ok(())
@@ -420,8 +419,40 @@ impl GoogleDriveFile {
     }
 }
 
+// FIXME: Do we need it?
+#[derive(Debug)]
+pub enum GoogleDriveError {
+    Oauth(String),
+    Api(HttpClientError<GoogleDriveApiError>),
+}
+
+impl Error for GoogleDriveError {
+    fn description(&self) -> &str {
+        match *self {
+            GoogleDriveError::Oauth(_) => "Google OAuth error",
+            GoogleDriveError::Api(ref e) => e.description(),
+        }
+    }
+}
+
+impl fmt::Display for GoogleDriveError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            GoogleDriveError::Oauth(ref e) => write!(f, "{}", e),
+            GoogleDriveError::Api(ref e) => e.fmt(f),
+        }
+    }
+}
+
+impl From<HttpClientError<GoogleDriveApiError>> for GoogleDriveError {
+    fn from(e: HttpClientError<GoogleDriveApiError>) -> GoogleDriveError {
+        GoogleDriveError::Api(e)
+    }
+}
+
+
 #[derive(Debug, Deserialize)]
-struct ApiError {
+struct GoogleDriveApiError {
     error: ApiErrorObject,
 }
 
@@ -430,13 +461,13 @@ struct ApiErrorObject {
     message: String,
 }
 
-impl Error for ApiError {
+impl Error for GoogleDriveApiError {
     fn description(&self) -> &str {
         "Google Drive error"
     }
 }
 
-impl fmt::Display for ApiError {
+impl fmt::Display for GoogleDriveApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.description(), self.error.message)
     }

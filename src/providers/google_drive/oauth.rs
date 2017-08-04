@@ -6,7 +6,7 @@ use std::time::{Instant, Duration};
 use serde::{ser, de};
 
 use core::GenericResult;
-use http_client::{HttpClient, HttpRequest, Method};
+use http_client::{HttpClient, HttpRequest, Method, HttpClientError};
 
 pub struct GoogleOauth {
     client_id: String,
@@ -66,7 +66,7 @@ impl GoogleOauth {
             expires_in: u64,
         }
 
-        let request = HttpRequest::<Response, ApiError>::new_json(
+        let request = HttpRequest::<Response, GoogleOauthApiError>::new_json(
             Method::Post, API_ENDPOINT.to_owned() + "/token",
             Duration::from_secs(API_REQUEST_TIMEOUT)
         ).with_form(&Request {
@@ -89,17 +89,17 @@ impl GoogleOauth {
 }
 
 #[derive(Debug, Deserialize)]
-struct ApiError {
+struct GoogleOauthApiError {
     error_description: String,
 }
 
-impl Error for ApiError {
+impl Error for GoogleOauthApiError {
     fn description(&self) -> &str {
         "Google OAuth error"
     }
 }
 
-impl fmt::Display for ApiError {
+impl fmt::Display for GoogleOauthApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.description(), self.error_description)
     }
