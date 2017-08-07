@@ -1,5 +1,7 @@
 use std::io;
 
+use digest::FixedOutput;
+use md_5;
 use sha2::{self, Digest};
 
 pub trait Hasher: io::Write + Send {
@@ -31,16 +33,6 @@ impl ChunkedSha256 {
     }
 }
 
-impl Hasher for ChunkedSha256 {
-    fn finish(mut self: Box<Self>) -> String {
-        if self.available_size != self.block_size {
-            self.consume_block();
-        }
-
-        format!("{:x}", self.result_hasher.result())
-    }
-}
-
 impl io::Write for ChunkedSha256 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let data_size = buf.len();
@@ -61,5 +53,42 @@ impl io::Write for ChunkedSha256 {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+impl Hasher for ChunkedSha256 {
+    fn finish(mut self: Box<Self>) -> String {
+        if self.available_size != self.block_size {
+            self.consume_block();
+        }
+
+        format!("{:x}", self.result_hasher.result())
+    }
+}
+
+pub struct Md5 {
+    hasher: md_5::Md5,
+}
+
+impl Md5 {
+    pub fn new() -> Md5 {
+        Md5 {hasher: md_5::Md5::default()}
+    }
+}
+
+impl io::Write for Md5 {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.hasher.consume(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Hasher for Md5 {
+    fn finish(self: Box<Self>) -> String {
+        format!("{:x}", self.hasher.fixed_result())
     }
 }
