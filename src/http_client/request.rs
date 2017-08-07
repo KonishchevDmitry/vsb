@@ -156,3 +156,7 @@ impl fmt::Display for HttpRequestBuildingError {
         write!(f, "{}: {}", self.description(), self.0)
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct EmptyRequest {
+}

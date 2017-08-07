@@ -132,10 +132,6 @@ impl HttpClient {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct EmptyResponse {
-}
-
 #[derive(Debug)]
 pub enum HttpClientError<T> {
     Generic(String),

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::ops::Add;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use serde::de;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, Method, HttpRequest, RawResponseReader, JsonErrorReader,
+use http_client::{HttpClient, Method, HttpRequest, EmptyRequest, RawResponseReader, JsonErrorReader,
                   HttpClientError};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::ChunkStreamReceiver;
@@ -36,10 +37,59 @@ impl GoogleDrive {
         }
     }
 
-    // FIXME
-    fn new_file(&self, path: &str) -> GenericResult<(String, String)> {
+    fn start_file_upload(&self, path: &str, mime_type: &ContentType, overwrite: bool) -> GenericResult<String> {
+        let (parent_id, name, file_id) = self.get_new_file_info(path)?;
+        if file_id.is_some() && !overwrite {
+            return Err!("File already exists");
+        }
+
+        let method = match file_id {
+            Some(_) => Method::Patch,
+            None => Method::Post,
+        };
+
+        let mut url = UPLOAD_ENDPOINT.to_owned() + "/files";
+        if let Some(ref file_id) = file_id {
+            url = url + "/" + &file_id;
+        }
+        url += "?uploadType=resumable";
+
+        let mut request = HttpRequest::new(
+            method, url, Duration::from_secs(API_REQUEST_TIMEOUT),
+            RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
+            .with_header(Authorization(Bearer {token: self.access_token()?}), false);
+
+        request = if file_id.is_some() {
+            request.with_json(&EmptyRequest {})?
+        } else {
+            #[derive(Serialize)]
+            struct Request<'a> {
+                name: &'a str,
+                mime_type: &'a str,
+                parents: Vec<String>,
+            }
+
+            request.with_json(&Request {
+                name: &name,
+                mime_type: mime_type.as_ref(),
+                parents: vec![parent_id],
+            })?
+        };
+
+        let upload_url = match self.client.send(request)?.headers.get::<Location>() {
+            Some(location) => location.to_string(),
+            None => return Err!(concat!(
+                "Got an invalid response from Google Drive API: ",
+                "upload session has been created, but session URI hasn't been returned"
+            )),
+        };
+
+        Ok(upload_url)
+    }
+
+    fn get_new_file_info(&self, path: &str) -> GenericResult<(String, String, Option<String>)> {
         if path == "/" {
-            return Err!("File already exists")
+            return Err!("An attempt to upload a file as {:?}", path)
         }
 
         if !path.starts_with('/') || path.ends_with('/') {
@@ -57,12 +107,14 @@ impl GoogleDrive {
             Some(parent) => parent,
             None => return Err!("{:?} directory doesn't exist", parent_path),
         };
+        let files = self.list_children(&parent.id)?;
 
-        if self.list_children(&parent.id)?.contains_key(&name) {
-            return Err!("File already exists")
-        }
+        let file_id = match get_file(files, path, &name)? {
+            Some(file) => Some(file.id),
+            None => None,
+        };
 
-        return Ok((parent.id, name))
+        return Ok((parent.id, name, file_id))
     }
 
     fn stat_path(&self, path: &str) -> GenericResult<Option<GoogleDriveFile>> {
@@ -83,7 +135,7 @@ impl GoogleDrive {
         let mut component = components.next().unwrap();
 
         loop {
-            let mut files = self.list_children(&cur_dir_id).map_err(|e| format!(
+            let files = self.list_children(&cur_dir_id).map_err(|e| format!(
                 "Error while reading {:?} directory: {}", cur_path, e))?;
 
             if !cur_path.ends_with('/') {
@@ -91,15 +143,8 @@ impl GoogleDrive {
             }
             cur_path += component;
 
-            let file = match files.remove(component) {
-                Some(mut files) => {
-                    match files.len() {
-                        0 => unreachable!(),
-                        1 => files.pop().unwrap(),
-                        _ => return Err!("{:?} path is unambiguous: it resolves to {} files",
-                                    cur_path, files.len()),
-                    }
-                },
+            let file = match get_file(files, &cur_path, &component)? {
+                Some(file) => file,
                 None => return Ok(None),
             };
 
@@ -182,39 +227,6 @@ impl GoogleDrive {
             .with_header(Authorization(Bearer {token: self.access_token()?}), false))
     }
 
-    fn start_file_upload(&self, path: &str, mime_type: &str) -> GenericResult<String> {
-        let (parent_id, name) = self.new_file(path)?;
-
-        #[derive(Serialize)]
-        struct Request<'a> {
-            name: &'a str,
-            #[serde(rename = "mimeType")]
-            mime_type: &'a str,
-            parents: Vec<String>,
-        }
-
-        let request = HttpRequest::new(
-            Method::Post, UPLOAD_ENDPOINT.to_owned() + "/files?uploadType=resumable",
-            Duration::from_secs(API_REQUEST_TIMEOUT),
-            RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false)
-            .with_json(&Request {
-                name: &name,
-                mime_type: mime_type,
-                parents: vec![parent_id],
-            })?;
-
-        let upload_url = match self.client.send(request)?.headers.get::<Location>() {
-            Some(location) => location.to_string(),
-            None => return Err!(concat!(
-                "Got an invalid response from Google Drive API: ",
-                "upload session has been created, but session URI hasn't been returned"
-            )),
-        };
-
-        Ok(upload_url)
-    }
-
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
         HttpRequest::new_json(Method::Put, location, Duration::from_secs(timeout))
     }
@@ -276,16 +288,49 @@ impl WriteProvider for GoogleDrive {
     }
 
     fn create_directory(&self, path: &str) -> EmptyResult {
-        let upload_url = self.start_file_upload(path, DIRECTORY_MIME_TYPE)?;
+        let content_type = ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap());
+        let upload_url = self.start_file_upload(path, &content_type, false)?;
         let request = self.file_upload_request(upload_url, API_REQUEST_TIMEOUT)
-            .with_text_body(ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap()), "")?;
+            .with_text_body(content_type, "")?;
         self.client.send(request)?;
         Ok(())
     }
 
     // FIXME
-    fn upload_file(&self, _temp_path: &str, _path: &str, _chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        unimplemented!()
+    fn upload_file(&self, temp_path: &str, path: &str, _chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+        let temp_path_components: Vec<&str> = temp_path.rsplitn(2, '/').collect();
+        let path_components: Vec<&str> = path.rsplitn(2, '/').collect();
+
+        if temp_path_components.len() != 2 {
+            return Err!("Invalid path: {:?}", temp_path);
+        }
+
+        if path_components.len() != 2 {
+            return Err!("Invalid path: {:?}", path);
+        }
+
+        if temp_path_components[1] != path_components[1] {
+            return Err!("Temporary file must be in the same directory as destination file")
+        }
+        let name = path_components[0];
+
+        let content_type = ContentType::octet_stream();
+        let upload_url = self.start_file_upload(temp_path, &content_type, true)?;
+        let request = self.file_upload_request(upload_url, API_REQUEST_TIMEOUT)
+            .with_body(content_type, None, "")?;  // FIXME: body
+        let file = self.client.send(request)?;
+
+        #[derive(Serialize)]
+        struct RenameRequest<'a> {
+            name: &'a str,
+        }
+        let request = self.api_request(Method::Patch, &"/files/".to_owned().add(&file.id))?
+            .with_json(&RenameRequest {
+                name: name,
+            })?;
+        let _: GoogleDriveFile = self.client.send(request)?;
+
+        Ok(())
 //        #[derive(Serialize)]
 //        struct StartRequest {
 //        }
@@ -403,6 +448,22 @@ impl GoogleDriveFile {
             FileType::File
         }
     }
+}
+
+fn get_file(mut directory_files: HashMap<String, Vec<GoogleDriveFile>>, path: &str, name: &str)
+    -> GenericResult<Option<GoogleDriveFile>>
+{
+    Ok(match directory_files.remove(name) {
+        Some(mut files) => {
+            match files.len() {
+                0 => unreachable!(),
+                1 => Some(files.pop().unwrap()),
+                _ => return Err!("{:?} path is unambiguous: it resolves to {} files",
+                            path, files.len()),
+            }
+        },
+        None => None,
+    })
 }
 
 // FIXME: Do we need it?

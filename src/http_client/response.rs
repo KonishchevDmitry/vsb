@@ -5,3 +5,7 @@ pub struct HttpResponse {
     pub headers: Headers,
     pub body: Vec<u8>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct EmptyResponse {
+}
