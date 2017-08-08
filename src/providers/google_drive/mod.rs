@@ -216,6 +216,24 @@ impl GoogleDrive {
         Ok(files)
     }
 
+    fn delete_file(&self, path: &str, only_if_exists: bool) -> EmptyResult {
+        let file = match self.stat_path(path)? {
+            Some(file) => file,
+            None => {
+                if only_if_exists {
+                    return Ok(())
+                } else {
+                    return Err!("No such file or directory")
+                }
+            },
+        };
+
+        let request = self.delete_request(&"/files/".to_owned().add(&file.id))?;
+        self.client.send(request)?;
+
+        Ok(())
+    }
+
     fn access_token(&self) -> Result<String, GoogleDriveError> {
         self.oauth.get_access_token().map_err(|e| GoogleDriveError::Oauth(format!(
             "Unable obtain a Google OAuth token: {}", e)))
@@ -306,47 +324,55 @@ impl WriteProvider for GoogleDrive {
         Ok(())
     }
 
-    // FIXME
-    fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+    fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
+                   chunk_streams: ChunkStreamReceiver) -> EmptyResult {
         let temp_path = directory_path.trim_right_matches('/').to_owned().add("/").add(temp_name);
-        let path = directory_path.trim_right_matches('/').to_owned().add("/").add(name);
         let mut file = None;
 
         for result in chunk_streams.iter() {
             match result {
                 Ok(ChunkStream::Stream(offset, chunk_stream)) => {
+                    assert!(file.is_none());
+                    assert_eq!(offset, 0);
+
                     let content_type = ContentType::octet_stream();
                     let upload_url = self.start_file_upload(&temp_path, &content_type, true)?;
+
                     let request = self.file_upload_request(upload_url, UPLOAD_REQUEST_TIMEOUT)
                         .with_body(content_type, None, chunk_stream)?;
                     file = Some(self.client.send(request)?);
                 },
                 Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
+                    if size == 0 {
+                        return Err!("An attempt to upload an empty file");
+                    }
+
                     let file = file.unwrap();
 
                     #[derive(Deserialize)]
-                    struct GoogleDriveFileMetadata {
+                    struct Metadata {
                         #[serde(rename = "md5Checksum")]
                         md5_checksum: String,
                     }
 
                     let request = self.api_request(
                         Method::Get, &"/files/".to_owned().add(&file.id).add("?fields=md5Checksum"))?;
-                    let metadata: GoogleDriveFileMetadata = self.client.send(request)?;
+                    let metadata: Metadata = self.client.send(request)?;
 
                     if metadata.md5_checksum != checksum {
-                        if let Err(err) = self.delete(&temp_path) {
+                        if let Err(e) = self.delete_file(&temp_path, true) {
                             error!("Failed to delete a temporary {:?} file from {}: {}.",
-                                temp_path, self.name(), err);
+                                   temp_path, self.name(), e);
                         }
-                        return Err("Checksum mismatch".into());
+                        return Err!("Checksum mismatch");
                     }
 
                     #[derive(Serialize)]
                     struct RenameRequest<'a> {
                         name: &'a str,
                     }
-                    let request = self.api_request(Method::Patch, &"/files/".to_owned().add(&file.id))?
+                    let request = self.api_request(
+                        Method::Patch, &"/files/".to_owned().add(&file.id))?
                         .with_json(&RenameRequest {
                             name: name,
                         })?;
@@ -354,7 +380,15 @@ impl WriteProvider for GoogleDrive {
 
                     return Ok(())
                 }
-                Err(err) => return Err(err.into()),
+                Err(err) => {
+                    if file.is_some() {
+                        if let Err(e) = self.delete_file(&temp_path, true) {
+                            error!("Failed to delete a temporary {:?} file from {}: {}.",
+                                   temp_path, self.name(), e);
+                        }
+                    }
+                    return Err(err.into())
+                },
             }
         }
 
@@ -362,15 +396,7 @@ impl WriteProvider for GoogleDrive {
     }
 
     fn delete(&self, path: &str) -> EmptyResult {
-        let file = match self.stat_path(path)? {
-            Some(file) => file,
-            None => return Err!("No such file or directory"),
-        };
-
-        let request = self.delete_request(&"/files/".to_owned().add(&file.id))?;
-        self.client.send(request)?;
-
-        Ok(())
+        self.delete_file(path, false)
     }
 }
 
