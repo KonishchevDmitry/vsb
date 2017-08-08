@@ -1,3 +1,5 @@
+mod oauth;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -16,7 +18,6 @@ use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest, R
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-mod oauth;
 use self::oauth::GoogleOauth;
 
 const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
@@ -164,10 +165,6 @@ impl GoogleDrive {
         }
     }
 
-    fn get_file_metadata(&self, id: &str) {
-
-    }
-
     fn list_children(&self, id: &str) -> GenericResult<HashMap<String, Vec<GoogleDriveFile>>> {
         #[derive(Serialize)]
         struct RequestParams {
@@ -292,7 +289,6 @@ impl ReadProvider for GoogleDrive {
 }
 
 impl WriteProvider for GoogleDrive {
-    // FIXME
     fn hasher(&self) -> Box<Hasher> {
         Box::new(Md5::new())
     }
@@ -315,11 +311,11 @@ impl WriteProvider for GoogleDrive {
         let temp_path_components: Vec<&str> = temp_path.rsplitn(2, '/').collect();
         let path_components: Vec<&str> = path.rsplitn(2, '/').collect();
 
-        if temp_path_components.len() != 2 {
+        if temp_path.ends_with('/') || temp_path_components.len() != 2 {
             return Err!("Invalid path: {:?}", temp_path);
         }
 
-        if path_components.len() != 2 {
+        if path.ends_with('/') || path_components.len() != 2 {
             return Err!("Invalid path: {:?}", path);
         }
 
@@ -341,6 +337,12 @@ impl WriteProvider for GoogleDrive {
                 },
                 Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
                     let file = file.unwrap();
+
+                    #[derive(Deserialize)]
+                    struct GoogleDriveFileMetadata {
+                        #[serde(rename = "md5Checksum")]
+                        md5_checksum: String,
+                    }
 
                     let request = self.api_request(
                         Method::Get, &"/files/".to_owned().add(&file.id).add("?fields=md5Checksum"))?;
@@ -373,10 +375,11 @@ impl WriteProvider for GoogleDrive {
         Err!("Chunk stream sender has been closed without a termination message")
     }
 
-    // FIXME
     fn delete(&self, path: &str) -> EmptyResult {
-        let file = self.stat_path(path)?;
-        let file = file.unwrap();
+        let file = match self.stat_path(path)? {
+            Some(file) => file,
+            None => return Err!("No such file or directory"),
+        };
 
         let request = self.delete_request(&"/files/".to_owned().add(&file.id))?;
         self.client.send(request)?;
@@ -407,12 +410,6 @@ impl GoogleDriveFile {
     }
 }
 
-#[derive(Deserialize)]
-struct GoogleDriveFileMetadata {
-    #[serde(rename = "md5Checksum")]
-    md5_checksum: String,
-}
-
 fn get_file(mut directory_files: HashMap<String, Vec<GoogleDriveFile>>, path: &str, name: &str)
     -> GenericResult<Option<GoogleDriveFile>>
 {
@@ -429,7 +426,6 @@ fn get_file(mut directory_files: HashMap<String, Vec<GoogleDriveFile>>, path: &s
     })
 }
 
-// FIXME: Do we need it?
 #[derive(Debug)]
 enum GoogleDriveError {
     Oauth(String),
