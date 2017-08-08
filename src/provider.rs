@@ -23,7 +23,8 @@ pub trait WriteProvider: Provider {
     fn max_request_size(&self) -> Option<u64>;
 
     fn create_directory(&self, path: &str) -> EmptyResult;
-    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult;
+    fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
+                   chunk_streams: ChunkStreamReceiver) -> EmptyResult;
     fn delete(&self, path: &str) -> EmptyResult;
 }
 

@@ -307,30 +307,16 @@ impl WriteProvider for GoogleDrive {
     }
 
     // FIXME
-    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        let temp_path_components: Vec<&str> = temp_path.rsplitn(2, '/').collect();
-        let path_components: Vec<&str> = path.rsplitn(2, '/').collect();
-
-        if temp_path.ends_with('/') || temp_path_components.len() != 2 {
-            return Err!("Invalid path: {:?}", temp_path);
-        }
-
-        if path.ends_with('/') || path_components.len() != 2 {
-            return Err!("Invalid path: {:?}", path);
-        }
-
-        if temp_path_components[1] != path_components[1] {
-            return Err!("Temporary file must be in the same directory as destination file")
-        }
-        let name = path_components[0];
-
+    fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+        let temp_path = directory_path.trim_right_matches('/').to_owned().add("/").add(temp_name);
+        let path = directory_path.trim_right_matches('/').to_owned().add("/").add(name);
         let mut file = None;
 
         for result in chunk_streams.iter() {
             match result {
                 Ok(ChunkStream::Stream(offset, chunk_stream)) => {
                     let content_type = ContentType::octet_stream();
-                    let upload_url = self.start_file_upload(temp_path, &content_type, true)?;
+                    let upload_url = self.start_file_upload(&temp_path, &content_type, true)?;
                     let request = self.file_upload_request(upload_url, UPLOAD_REQUEST_TIMEOUT)
                         .with_body(content_type, None, chunk_stream)?;
                     file = Some(self.client.send(request)?);
@@ -349,7 +335,7 @@ impl WriteProvider for GoogleDrive {
                     let metadata: GoogleDriveFileMetadata = self.client.send(request)?;
 
                     if metadata.md5_checksum != checksum {
-                        if let Err(err) = self.delete(temp_path) {
+                        if let Err(err) = self.delete(&temp_path) {
                             error!("Failed to delete a temporary {:?} file from {}: {}.",
                                 temp_path, self.name(), err);
                         }

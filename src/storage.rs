@@ -99,8 +99,9 @@ impl Storage {
 
         let backup_name = backup_name.to_owned();
         let local_backup_path = local_backup_path.to_owned();
-        let cloud_backup_temp_path = self.get_backup_path(group_name, &backup_name, true);
-        let cloud_backup_path = self.get_backup_path(group_name, &backup_name, false);
+        let group_path = self.get_backup_group_path(group_name);
+        let temp_file_name = self.get_backup_file_name(&backup_name, true);
+        let file_name = self.get_backup_file_name(&backup_name, false);
 
         let (chunk_streams, splitter_thread) = stream_splitter::split(
             data_stream, provider.max_request_size())?;
@@ -116,7 +117,7 @@ impl Storage {
         };
 
         let upload_result = provider.upload_file(
-            &cloud_backup_temp_path, &cloud_backup_path, chunk_streams);
+            &group_path, &temp_file_name, &file_name, chunk_streams);
 
         let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
             "Archive operation has failed: {}", e));
@@ -142,16 +143,19 @@ impl Storage {
         self.path.trim_right_matches('/').to_owned() + "/" + group_name
     }
 
-    pub fn get_backup_path(&self, group_name: &str, backup_name: &str, temporary: bool) -> String {
+    pub fn get_backup_path(&self, group_name: &str, backup_name: &str) -> String {
+        self.get_backup_group_path(group_name) + "/" + &self.get_backup_file_name(backup_name, false)
+    }
+
+    fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {
         let extension = BackupFileTraits::get_for(self.provider.read().type_()).extension;
 
-        let mut path = self.get_backup_group_path(group_name) + "/";
+        let prefix = match temporary {
+            true => ".",
+            false => "",
+        }.to_owned();
 
-        if temporary {
-            path += ".";
-        }
-
-        path + backup_name + extension
+        prefix + backup_name + extension
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {

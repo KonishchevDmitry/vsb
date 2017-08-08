@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::ops::Add;
 use std::time::Duration;
 
 use hyper::Body;
@@ -186,7 +187,11 @@ impl WriteProvider for Dropbox {
         Ok(())
     }
 
-    fn upload_file(&self, temp_path: &str, path: &str, chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+    fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
+                   chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+        let temp_path = directory_path.trim_right_matches('/').to_owned().add("/").add(temp_name);
+        let path = directory_path.trim_right_matches('/').to_owned().add("/").add(name);
+
         #[derive(Serialize)]
         struct StartRequest {
         }
@@ -246,20 +251,20 @@ impl WriteProvider for Dropbox {
                                 offset: size,
                             },
                             commit: Commit {
-                                path: temp_path,
+                                path: &temp_path,
                                 mode: "overwrite",
                             },
                         }, "")?;
 
                     if finish_response.content_hash != checksum {
-                        if let Err(err) = self.delete(temp_path) {
+                        if let Err(err) = self.delete(&temp_path) {
                             error!("Failed to delete a temporary {:?} file from {}: {}.",
-                                temp_path, self.name(), err);
+                                   temp_path, self.name(), err);
                         }
                         return Err("Checksum mismatch".into());
                     }
 
-                    return self.rename_file(temp_path, path);
+                    return self.rename_file(&temp_path, &path);
                 }
                 Err(err) => return Err(err.into()),
             }

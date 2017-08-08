@@ -54,7 +54,7 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
                 continue;
             }
 
-            let backup_path = local_storage.get_backup_path(group_name, backup_name, false);
+            let backup_path = local_storage.get_backup_path(group_name, backup_name);
             info!("Uploading {:?} backup to {}...", backup_path, cloud_storage.name());
 
             if let Err(err) = cloud_storage.upload_backup(
