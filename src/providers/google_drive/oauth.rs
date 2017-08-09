@@ -35,15 +35,11 @@ impl GoogleOauth {
         }
     }
 
-    pub fn get_access_token(&self) -> GenericResult<String> {
+    pub fn get_access_token(&self, duration: Duration) -> GenericResult<String> {
         let mut access_token = self.access_token.borrow_mut();
 
         if let Some(ref access_token) = *access_token {
-            let now = Instant::now();
-
-            if access_token.expire_time > now &&
-                access_token.expire_time.duration_since(now) > Duration::from_secs(1) // FIXME: Request timeout here?
-            {
+            if access_token.expire_time > Instant::now() + duration {
                 return Ok(access_token.token.to_owned());
             }
         }

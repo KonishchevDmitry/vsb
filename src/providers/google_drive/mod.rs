@@ -235,8 +235,9 @@ impl GoogleDrive {
     }
 
     fn access_token(&self) -> Result<String, GoogleDriveError> {
-        self.oauth.get_access_token().map_err(|e| GoogleDriveError::Oauth(format!(
-            "Unable obtain a Google OAuth token: {}", e)))
+        self.oauth.get_access_token(Duration::from_secs(API_REQUEST_TIMEOUT))
+            .map_err(|e| GoogleDriveError::Oauth(format!(
+                "Unable obtain a Google OAuth token: {}", e)))
     }
 
     fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>

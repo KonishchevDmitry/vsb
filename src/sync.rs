@@ -12,7 +12,6 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
     // FIXME: Drop develop mode
     let develop_mode = if cfg!(debug_assertions) {
         error!("Attention! Running in develop mode.");
-        // FIXME
         ok = false;
         true
     } else {
