@@ -40,38 +40,42 @@ impl HttpClient {
         self
     }
 
-    // FIXME
     pub fn send<R, E>(&self, request: HttpRequest<R, E>) -> Result<R, HttpClientError<E>> {
-        // FIXME
-        if log_enabled!(LogLevel::Trace) {
-            let mut extra_info = String::new();
-
-            if request.trace_headers.len() != 0 {
-                extra_info += &format!("\n{}", request.trace_headers.iter()
-                    .map(|header| header/*.to_string()*/.trim_right_matches("\r\n").to_owned())
-                           .collect::<Vec<_>>().join("\n"));
-            }
-
-            if let Some(body) = request.trace_body {
-                extra_info = extra_info + " " + &body;
-            }
-
-            trace!("Sending {method} {url}{extra_info}...",
-                   method=request.method, url=request.url, extra_info=extra_info);
-        }
-
         let mut headers = self.default_headers.clone();
         headers.extend(request.headers.iter());
 
+        if log_enabled!(LogLevel::Trace) {
+            let mut extra_info = String::new();
+
+            if headers.len() != 0 {
+                extra_info += "\n";
+                extra_info += &headers.iter()
+                    .map(|header| header.to_string().trim_right_matches("\r\n").to_owned())
+                    .collect::<Vec<_>>().join("\n");
+            }
+
+            if let Some(body) = request.trace_body {
+                extra_info += "\n";
+                extra_info += &body;
+            }
+
+            if extra_info.is_empty() {
+                extra_info += "...";
+            } else {
+                extra_info.insert(0, ':');
+            }
+
+            trace!("Sending {method} {url}{extra_info}",
+                   method=request.method, url=request.url, extra_info=extra_info);
+        }
+
         let response = self.send_request(
-            request.method, &request.url, headers, request.body, request.timeout)
-            .map_err(HttpClientError::generic_from)?; // FIXME
+            request.method, &request.url, headers, request.body, request.timeout)?;
 
         if response.status.is_success() {
-            Ok(request.reply_reader.read(response).map_err(HttpClientError::generic_from)?)
+            Ok(request.reply_reader.read(response)?)
         } else if response.status.is_client_error() || response.status.is_server_error() {
-            Err(HttpClientError::Api(
-                request.error_reader.read(response).map_err(HttpClientError::generic_from)?))
+            Err(HttpClientError::Api(request.error_reader.read(response)?))
         } else {
             Err!("Server returned an error: {}", response.status)
         }
@@ -122,7 +126,8 @@ impl HttpClient {
             Err((err, _)) => Err(err),
         }?;
         let body = body.to_vec();
-        trace!("Got {} response: {}", status, String::from_utf8_lossy(&body));
+        trace!("Got {} response: {}", status,
+               String::from_utf8_lossy(&body).trim_right_matches('\n'));
 
         Ok(HttpResponse {
             status: status,
@@ -136,13 +141,6 @@ impl HttpClient {
 pub enum HttpClientError<T> {
     Generic(String),
     Api(T),
-}
-
-impl<T> HttpClientError<T> {
-    // FIXME: Do we need these conversions?
-    pub fn generic_from<E: ToString>(error: E) -> HttpClientError<T> {
-        HttpClientError::Generic(error.to_string())
-    }
 }
 
 impl<T: Error> Error for HttpClientError<T> {
@@ -169,9 +167,14 @@ impl<T> From<HttpRequestBuildingError> for HttpClientError<T> {
     }
 }
 
-// FIXME: Do we need these conversions?
 impl<T> From<String> for HttpClientError<T> {
     fn from(err: String) -> HttpClientError<T> {
         HttpClientError::Generic(err)
+    }
+}
+
+impl<T> From<Box<Error + Send + Sync>> for HttpClientError<T> {
+    fn from(err: Box<Error + Send + Sync>) -> HttpClientError<T> {
+        HttpClientError::Generic(err.to_string())
     }
 }

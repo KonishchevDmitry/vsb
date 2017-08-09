@@ -21,7 +21,6 @@ pub struct HttpRequest<'a, R, E> {
     pub body: Option<Body>,
     pub timeout: Duration, // FIXME: default timeout / default headers?
 
-    pub trace_headers: Vec<String>,
     pub trace_body: Option<String>,
 
     // FIXME: private
@@ -44,8 +43,6 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
             body: None,
             timeout: timeout,
 
-            // FIXME
-            trace_headers: Vec::new(),
             trace_body: None,
 
             reply_reader: Box::new(reply_reader),
@@ -68,23 +65,12 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         Ok(self)
     }
 
-    // FIXME: ::std::fmt::Display
-    pub fn with_header<H: Header + ::std::fmt::Display>(mut self, header: H, trace: bool) -> HttpRequest<'a, R, E> {
-        if trace {
-            // FIXME
-            self.trace_headers.push(header.to_string())
-        }
+    pub fn with_header<H: Header>(mut self, header: H) -> HttpRequest<'a, R, E> {
         self.headers.set(header);
         self
     }
 
-    pub fn with_raw_header<K: Into<Cow<'static, str>>, V: Into<Raw>>(mut self, name: K, value: V, trace: bool) -> HttpRequest<'a, R, E> {
-        let name = name.into();
-        let value = value.into();
-        if trace {
-            // FIXME
-            self.trace_headers.push(format!("{}: {:?}", name, value))
-        }
+    pub fn with_raw_header<K: Into<Cow<'static, str>>, V: Into<Raw>>(mut self, name: K, value: V) -> HttpRequest<'a, R, E> {
         self.headers.set_raw(name, value);
         self
     }

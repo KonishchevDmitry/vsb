@@ -59,7 +59,7 @@ impl GoogleDrive {
         let mut request = HttpRequest::new(
             method, url, Duration::from_secs(API_REQUEST_TIMEOUT),
             RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false);
+            .with_header(Authorization(Bearer {token: self.access_token()?}));
 
         request = if file_id.is_some() {
             request.with_json(&EmptyRequest {})?
@@ -245,7 +245,7 @@ impl GoogleDrive {
         Ok(HttpRequest::new_json(
             method, API_ENDPOINT.to_owned() + path,
             Duration::from_secs(API_REQUEST_TIMEOUT))
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
+            .with_header(Authorization(Bearer {token: self.access_token()?})))
     }
 
     fn delete_request(&self, path: &str) -> Result<HttpRequest<HttpResponse, GoogleDriveApiError>, GoogleDriveError> {
@@ -253,7 +253,7 @@ impl GoogleDrive {
             Method::Delete, API_ENDPOINT.to_owned() + path,
             Duration::from_secs(API_REQUEST_TIMEOUT),
             RawResponseReader::new(), JsonErrorReader::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?}), false))
+            .with_header(Authorization(Bearer {token: self.access_token()?})))
     }
 
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {

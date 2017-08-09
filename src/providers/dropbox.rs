@@ -68,7 +68,7 @@ impl Dropbox {
         let http_request = HttpRequest::new_json(
             Method::Post, CONTENT_ENDPOINT.to_owned() + path,
             Duration::from_secs(CONTENT_REQUEST_TIMEOUT))
-            .with_raw_header("Dropbox-API-Arg", request_json, true)
+            .with_raw_header("Dropbox-API-Arg", request_json)
             .with_body(ContentType::octet_stream(), None, body)?;
 
         self.client.send(http_request)
