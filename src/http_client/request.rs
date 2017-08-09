@@ -12,18 +12,15 @@ use serde_urlencoded;
 
 use super::{Method, Headers, ResponseReader, JsonReplyReader, JsonErrorReader};
 
-// FIXME: pub?
-// FIXME: lifetimes
 pub struct HttpRequest<'a, R, E> {
     pub method: Method,
     pub url: String,
     pub headers: Headers,
-    pub body: Option<Body>,
-    pub timeout: Duration, // FIXME: default timeout / default headers?
+    pub timeout: Duration,
 
+    pub body: Option<Body>,
     pub trace_body: Option<String>,
 
-    // FIXME: private
     pub reply_reader: Box<ResponseReader<Result=R> + 'a>,
     pub error_reader: Box<ResponseReader<Result=E> + 'a>,
 }
@@ -77,7 +74,6 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
 
     pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
                                     body: B) -> HttpRequestBuildingResult<'a, R, E> {
-        // FIXME: panic?
         if self.body.is_some() {
             return Err(HttpRequestBuildingError::new("An attempt to set request body twice"))
         }
@@ -96,13 +92,13 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         let body = body.into();
         let content_length = Some(body.len() as u64);
 
-        if log_enabled!(LogLevel::Trace) {
+        Ok(if log_enabled!(LogLevel::Trace) {
             let mut request = self.with_body(content_type, content_length, body.clone())?;
             request.trace_body = Some(body);
-            return Ok(request);
+            request
         } else {
-            return Ok(self.with_body(content_type, content_length, body)?);
-        }
+            self.with_body(content_type, content_length, body)?
+        })
     }
 
     pub fn with_form<B: ser::Serialize>(self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
