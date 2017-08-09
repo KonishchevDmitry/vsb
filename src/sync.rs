@@ -66,8 +66,7 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
             continue;
         }
 
-        // FIXME: Change to info after testing
-        warn!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
+        info!("Deleting {:?} backup group from {}...", group_name, cloud_storage.name());
         if let Err(err) = cloud_storage.delete_backup_group(group_name) {
             error!("Failed to delete {:?} backup backup group from {}: {}.",
                    group_name, cloud_storage.name(), err)
