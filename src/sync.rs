@@ -4,19 +4,15 @@ use storage::{Storage, BackupGroups, Backups};
 pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
                     cloud_storage: &mut Storage, cloud_groups: &BackupGroups,
                     mut ok: bool, max_backup_groups: usize, encryption_passphrase: &str) -> bool {
+    if cfg!(debug_assertions) {
+        error!("Attention! Running in develop mode.");
+        ok = false;
+    };
+
     if let Err(err) = check_backup_groups(local_groups, cloud_groups) {
         error!("{}.", err);
         ok = false;
     }
-
-    // FIXME: Drop develop mode
-    let develop_mode = if cfg!(debug_assertions) {
-        error!("Attention! Running in develop mode.");
-        ok = false;
-        true
-    } else {
-        false
-    };
 
     let target_groups = get_target_backup_groups(local_groups, cloud_groups, max_backup_groups);
     let no_backups = Backups::new();
@@ -42,13 +38,7 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
             },
         };
 
-        let mut first = true;
         for backup_name in target_backups.iter() {
-            if develop_mode && first {
-                first = false;
-                continue;
-            }
-
             if cloud_backups.contains(backup_name) {
                 continue;
             }
