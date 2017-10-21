@@ -21,7 +21,7 @@ use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 use self::oauth::GoogleOauth;
 
 const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
-const API_REQUEST_TIMEOUT: u64 = 5;
+const API_REQUEST_TIMEOUT: u64 = 15;
 
 const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3";
 const UPLOAD_REQUEST_TIMEOUT: u64 = 60 * 60;
