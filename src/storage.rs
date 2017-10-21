@@ -65,7 +65,7 @@ impl Storage {
             let (backups, mut backups_ok) = get_backups(provider, &group_path).map_err(|e| format!(
                 "Unable to list {:?} backup group: {}", group_path, e))?;
 
-            let mut backup_group = backup_groups.entry(group_name.to_owned())
+            let backup_group = backup_groups.entry(group_name.to_owned())
                 .or_insert_with(Backups::new);
 
             if !backups.is_empty() {
