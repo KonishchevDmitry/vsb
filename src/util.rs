@@ -2,8 +2,9 @@ use std::thread;
 use std::time::{self, Duration};
 
 use libc::pid_t;
-use nix::{Errno, sys, unistd};
 use nix::Error::Sys;
+use nix::errno::Errno;
+use nix::{sys, unistd};
 
 use core::{EmptyResult, GenericResult};
 
@@ -55,7 +56,7 @@ pub fn terminate_process(name: &str, pid: pid_t, timeout: Duration) -> EmptyResu
                     signal = sys::signal::SIGKILL;
                 }
 
-                match sys::wait::waitpid(pid, Some(sys::wait::WNOHANG)) {
+                match sys::wait::waitpid(pid, Some(sys::wait::WaitPidFlag::WNOHANG)) {
                     Ok(_) => break,
                     Err(Sys(errno)) if errno == Errno::ECHILD => (),
                     Err(err) => return Err!("Failed to wait() {}: {}", name, err),

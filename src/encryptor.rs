@@ -32,7 +32,7 @@ impl Encryptor {
         //    * One buffer slot for our error message.
         let (tx, rx) = mpsc::sync_channel(2);
 
-        let (passphrase_read_fd, passphrase_write_fd) = unistd::pipe2(fcntl::O_CLOEXEC)
+        let (passphrase_read_fd, passphrase_write_fd) = unistd::pipe2(fcntl::OFlag::O_CLOEXEC)
             .map_err(|e| format!("Unable to create a pipe: {}", e))?;
 
         let (passphrase_read_fd, mut passphrase_write_fd) = unsafe {

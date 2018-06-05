@@ -30,6 +30,7 @@ use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::process;
 
+use nix::errno::Errno;
 use nix::fcntl::{self, FlockArg};
 
 mod check;
@@ -86,7 +87,7 @@ fn acquire_lock(config_path: &str) -> GenericResult<File> {
         "Unable to open {:?}: {}", config_path, e))?;
 
     fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|e| {
-        if let nix::Error::Sys(nix::Errno::EAGAIN) = e {
+        if let nix::Error::Sys(Errno::EAGAIN) = e {
             format!(concat!(
                 "Unable to exclusively run the program for {:?} configuration file: ",
                 "it's already locked by another process"), config_path)
