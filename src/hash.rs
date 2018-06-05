@@ -1,7 +1,7 @@
 use std::io;
 
 use digest::FixedOutput;
-use md_5;
+use md5;
 use sha2::{self, Digest};
 
 pub trait Hasher: io::Write + Send {
@@ -10,9 +10,7 @@ pub trait Hasher: io::Write + Send {
 
 pub struct ChunkedSha256 {
     block_size: usize,
-    available_size: usize,
-
-    block_hasher: sha2::Sha256,
+    block_hasher: Option<BlockHasher>,
     result_hasher: sha2::Sha256,
 }
 
@@ -20,30 +18,46 @@ impl ChunkedSha256 {
     pub fn new(block_size: usize) -> ChunkedSha256 {
         ChunkedSha256 {
             block_size: block_size,
-            available_size: block_size,
-            block_hasher: sha2::Sha256::default(),
+            block_hasher: None,
             result_hasher: sha2::Sha256::default(),
         }
     }
 
     fn consume_block(&mut self) {
-        self.result_hasher.input(self.block_hasher.result().as_slice());
-        self.block_hasher = sha2::Sha256::default();
-        self.available_size = self.block_size;
+        if let Some(block_hasher) = self.block_hasher.take() {
+            self.result_hasher.input(block_hasher.hasher.result().as_slice());
+        }
     }
 }
 
 impl io::Write for ChunkedSha256 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let data_size = buf.len();
-        let available_size = self.available_size;
+        if data_size == 0 {
+            return Ok(data_size)
+        }
+
+        let available_size = match self.block_hasher {
+            Some(ref block_hasher) => block_hasher.available_size,
+            None => {
+                let available_size = self.block_size;
+
+                self.block_hasher = Some(BlockHasher {
+                    hasher: sha2::Sha256::default(),
+                    available_size: available_size,
+                });
+
+                available_size
+            }
+        };
 
         let consumed_size = if data_size < available_size {
-            self.block_hasher.input(buf);
-            self.available_size -= data_size;
+            let block_hasher = self.block_hasher.as_mut().unwrap();
+            block_hasher.hasher.input(buf);
+            block_hasher.available_size -= data_size;
             data_size
         } else {
-            self.block_hasher.input(&buf[..available_size]);
+            self.block_hasher.as_mut().unwrap().hasher.input(&buf[..available_size]);
             self.consume_block();
             available_size
         };
@@ -58,21 +72,23 @@ impl io::Write for ChunkedSha256 {
 
 impl Hasher for ChunkedSha256 {
     fn finish(mut self: Box<Self>) -> String {
-        if self.available_size != self.block_size {
-            self.consume_block();
-        }
-
+        self.consume_block();
         format!("{:x}", self.result_hasher.result())
     }
 }
 
+struct BlockHasher {
+    hasher: sha2::Sha256,
+    available_size: usize,
+}
+
 pub struct Md5 {
-    hasher: md_5::Md5,
+    hasher: md5::Md5,
 }
 
 impl Md5 {
     pub fn new() -> Md5 {
-        Md5 {hasher: md_5::Md5::default()}
+        Md5 {hasher: md5::Md5::default()}
     }
 }
 

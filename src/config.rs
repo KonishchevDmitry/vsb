@@ -6,7 +6,7 @@ use std::process;
 use std::time::Duration;
 
 use clap::{App, Arg, AppSettings};
-use log::LogLevel;
+use log;
 use regex::Regex;
 use serde::de::{self, Deserializer, Visitor};
 use serde_yaml;
@@ -73,9 +73,9 @@ pub fn load() -> Config {
         .get_matches();
 
     let log_level = match matches.occurrences_of("verbose") {
-        0 => LogLevel::Info,
-        1 => LogLevel::Debug,
-        2 => LogLevel::Trace,
+        0 => log::Level::Info,
+        1 => log::Level::Debug,
+        2 => log::Level::Trace,
         _ => {
             let _ = writeln!(io::stderr(), "Invalid verbosity level.");
             process::exit(1);

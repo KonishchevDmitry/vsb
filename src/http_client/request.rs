@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use hyper::Body;
 use hyper::header::{Header, Raw, ContentLength, ContentType};
-use log::LogLevel;
+use log;
 use serde::{ser, de};
 use serde_json;
 use serde_urlencoded;
@@ -92,7 +92,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         let body = body.into();
         let content_length = Some(body.len() as u64);
 
-        Ok(if log_enabled!(LogLevel::Trace) {
+        Ok(if log_enabled!(log::Level::Trace) {
             let mut request = self.with_body(content_type, content_length, body.clone())?;
             request.trace_body = Some(body);
             request

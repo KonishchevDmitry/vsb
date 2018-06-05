@@ -11,7 +11,7 @@ use futures::{Future, Stream};
 use hyper::{self, Client, Body, Chunk};
 use hyper::header::{Header, UserAgent};
 use hyper_tls::HttpsConnector;
-use log::LogLevel;
+use log;
 use tokio_core::reactor::{Core, Timeout};
 
 use core::GenericResult;
@@ -44,7 +44,7 @@ impl HttpClient {
         let mut headers = self.default_headers.clone();
         headers.extend(request.headers.iter());
 
-        if log_enabled!(LogLevel::Trace) {
+        if log_enabled!(log::Level::Trace) {
             let mut extra_info = String::new();
 
             if headers.len() != 0 {

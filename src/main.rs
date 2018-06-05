@@ -12,7 +12,7 @@ extern crate hyper_tls;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 #[macro_use] extern crate log;
-extern crate md_5;
+extern crate md5;
 extern crate mime;
 extern crate nix;
 extern crate regex;
@@ -136,7 +136,7 @@ fn get_backup_groups(storage: &Storage) -> GenericResult<(BackupGroups, bool)> {
     let (backup_groups, ok) = storage.get_backup_groups().map_err(|e| format!(
         "Failed to list backup groups on {}: {}", storage.name(), e))?;
 
-    if log_enabled!(log::LogLevel::Debug) {
+    if log_enabled!(log::Level::Debug) {
         if backup_groups.is_empty() {
             debug!("There are no backup groups on {}.", storage.name());
         } else {
