@@ -13,7 +13,7 @@ use serde_yaml;
 use shellexpand;
 
 use core::GenericResult;
-use logging;
+use easy_logging;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,7 +82,7 @@ pub fn load() -> Config {
         }
     };
 
-    if let Err(err) = logging::init(log_level) {
+    if let Err(err) = easy_logging::init(module_path!().split("::").next().unwrap(), log_level) {
         let _ = writeln!(io::stderr(), "Failed to initialize the logging: {}.", err);
         process::exit(1);
     }
