@@ -1,10 +1,10 @@
-use std::io;
+use std::io::{self, Write};
 
 use digest::FixedOutput;
 use md5;
 use sha2::{self, Digest};
 
-pub trait Hasher: io::Write + Send {
+pub trait Hasher: Write + Send {
     fn finish(self: Box<Self>) -> String;
 }
 
@@ -30,7 +30,7 @@ impl ChunkedSha256 {
     }
 }
 
-impl io::Write for ChunkedSha256 {
+impl Write for ChunkedSha256 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let data_size = buf.len();
         if data_size == 0 {
@@ -92,14 +92,13 @@ impl Md5 {
     }
 }
 
-impl io::Write for Md5 {
+impl Write for Md5 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.hasher.consume(buf);
-        Ok(buf.len())
+        self.hasher.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.hasher.flush()
     }
 }
 
