@@ -32,15 +32,8 @@ impl Encryptor {
         //    * One buffer slot for our error message.
         let (tx, rx) = mpsc::sync_channel(2);
 
-        let (passphrase_read_fd, passphrase_write_fd) = unistd::pipe2(fcntl::OFlag::O_CLOEXEC)
+        let (passphrase_read_fd, mut passphrase_write_fd) = create_passphrase_pipe()
             .map_err(|e| format!("Unable to create a pipe: {}", e))?;
-
-        let (passphrase_read_fd, mut passphrase_write_fd) = unsafe {
-            (File::from_raw_fd(passphrase_read_fd), File::from_raw_fd(passphrase_write_fd))
-        };
-
-        fcntl::fcntl(passphrase_read_fd.as_raw_fd(),
-                     fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
 
         debug!("Spawning a gpg process to handle data encryption...");
 
@@ -154,6 +147,32 @@ impl io::Write for Encryptor {
             io_error_from(self.close(Err(e.into())).unwrap_err())
         })
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn create_passphrase_pipe() -> nix::Result<(File, File)> {
+    let (read_fd, write_fd) = unistd::pipe2(fcntl::OFlag::O_CLOEXEC).map(|(read_fd, write_fd)| {
+        unsafe {
+            (File::from_raw_fd(read_fd), File::from_raw_fd(write_fd))
+        }
+    })?;
+
+    fcntl::fcntl(read_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
+
+    Ok((read_fd, write_fd))
+}
+
+#[cfg(target_os = "macos")]
+fn create_passphrase_pipe() -> nix::Result<(File, File)> {
+    let (read_fd, write_fd) = unistd::pipe().map(|(read_fd, write_fd)| {
+        unsafe {
+            (File::from_raw_fd(read_fd), File::from_raw_fd(write_fd))
+        }
+    })?;
+
+    fcntl::fcntl(write_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::FD_CLOEXEC))?;
+
+    Ok((read_fd, write_fd))
 }
 
 fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
