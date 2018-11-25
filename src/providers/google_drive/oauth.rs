@@ -61,7 +61,7 @@ impl GoogleOauth {
         }
 
         let request = HttpRequest::<Response, GoogleOauthApiError>::new_json(
-            Method::Post, API_ENDPOINT.to_owned() + "/token",
+            Method::POST, API_ENDPOINT.to_owned() + "/token",
             Duration::from_secs(API_REQUEST_TIMEOUT)
         ).with_form(&Request {
             client_id: &self.client_id,

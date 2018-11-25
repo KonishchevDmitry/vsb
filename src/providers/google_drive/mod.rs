@@ -4,17 +4,14 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::ops::Add;
-use std::str::FromStr;
 use std::time::Duration;
 
-use hyper::header::{Authorization, Bearer, Location, ContentType};
-use mime::Mime;
 use serde::de;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, Md5};
 use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest, RawResponseReader,
-                  JsonErrorReader, HttpClientError};
+                  JsonErrorReader, HttpClientError, headers};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -39,15 +36,15 @@ impl GoogleDrive {
         }
     }
 
-    fn start_file_upload(&self, path: &str, mime_type: &ContentType, overwrite: bool) -> GenericResult<String> {
+    fn start_file_upload(&self, path: &str, mime_type: &str, overwrite: bool) -> GenericResult<String> {
         let (parent_id, name, file_id) = self.get_new_file_info(path)?;
         if file_id.is_some() && !overwrite {
             return Err!("File already exists");
         }
 
         let method = match file_id {
-            Some(_) => Method::Patch,
-            None => Method::Post,
+            Some(_) => Method::PATCH,
+            None => Method::POST,
         };
 
         let mut url = UPLOAD_ENDPOINT.to_owned() + "/files";
@@ -56,10 +53,11 @@ impl GoogleDrive {
         }
         url += "?uploadType=resumable";
 
-        let mut request = HttpRequest::new(
-            method, url, Duration::from_secs(API_REQUEST_TIMEOUT),
-            RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?}));
+        let mut request = self.authenticate(
+            HttpRequest::new(
+                method, url, Duration::from_secs(API_REQUEST_TIMEOUT),
+                RawResponseReader::new(), JsonErrorReader::<GoogleDriveApiError>::new())
+        )?;
 
         request = if file_id.is_some() {
             request.with_json(&EmptyRequest {})?
@@ -74,18 +72,16 @@ impl GoogleDrive {
 
             request.with_json(&Request {
                 name: &name,
-                mime_type: mime_type.as_ref(),
+                mime_type: mime_type,
                 parents: vec![parent_id],
             })?
         };
 
-        let upload_url = match self.client.send(request)?.headers.get::<Location>() {
-            Some(location) => location.to_string(),
-            None => return Err!(concat!(
-                "Got an invalid response from Google Drive API: ",
-                "upload session has been created, but session URI hasn't been returned"
-            )),
-        };
+        let upload_url = self.client.send(request)?
+            .get_header(headers::LOCATION)
+            .and_then(|location: Option<&str>| location.ok_or_else(||
+                "Upload session has been created, but session URI hasn't been returned".into()))
+            .map_err(|e| format!("Got an invalid response from Google Drive API: {}", e))?.to_owned();
 
         Ok(upload_url)
     }
@@ -126,7 +122,7 @@ impl GoogleDrive {
 
         if path == "/" {
             let request_path = "/files/".to_owned() + &cur_dir_id;
-            let file_metadata = self.client.send(self.api_request(Method::Get, &request_path)?)?;
+            let file_metadata = self.client.send(self.api_request(Method::GET, &request_path)?)?;
             return Ok(Some(file_metadata));
         } else if !path.starts_with('/') || path.ends_with('/') {
             return Err!("Invalid path: {:?}", path);
@@ -190,7 +186,7 @@ impl GoogleDrive {
         let mut files = HashMap::new();
 
         loop {
-            let request = self.api_request(Method::Get, "/files")?.with_params(&request_params)?;
+            let request = self.api_request(Method::GET, "/files")?.with_params(&request_params)?;
             let mut response: Response = self.client.send(request)?;
 
             if response.incomplete_search {
@@ -234,31 +230,36 @@ impl GoogleDrive {
         Ok(())
     }
 
-    fn access_token(&self) -> Result<String, GoogleDriveError> {
-        self.oauth.get_access_token(Duration::from_secs(API_REQUEST_TIMEOUT))
+    fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> Result<HttpRequest<'a, R, E>, GoogleDriveError> {
+        let access_token = self.oauth.get_access_token(Duration::from_secs(API_REQUEST_TIMEOUT))
             .map_err(|e| GoogleDriveError::Oauth(format!(
-                "Unable obtain a Google OAuth token: {}", e)))
+                "Unable obtain a Google OAuth token: {}", e)))?;
+
+        Ok(request.with_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
+            .map_err(|_| GoogleDriveError::Oauth(s!("Got an invalid Google OAuth token")))?)
     }
 
     fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>
         where R: de::DeserializeOwned + 'static
     {
-        Ok(HttpRequest::new_json(
-            method, API_ENDPOINT.to_owned() + path,
-            Duration::from_secs(API_REQUEST_TIMEOUT))
-            .with_header(Authorization(Bearer {token: self.access_token()?})))
+        Ok(self.authenticate(
+            HttpRequest::new_json(
+                method, API_ENDPOINT.to_owned() + path,
+                Duration::from_secs(API_REQUEST_TIMEOUT))
+        )?)
     }
 
     fn delete_request(&self, path: &str) -> Result<HttpRequest<HttpResponse, GoogleDriveApiError>, GoogleDriveError> {
-        Ok(HttpRequest::new(
-            Method::Delete, API_ENDPOINT.to_owned() + path,
-            Duration::from_secs(API_REQUEST_TIMEOUT),
-            RawResponseReader::new(), JsonErrorReader::new())
-            .with_header(Authorization(Bearer {token: self.access_token()?})))
+        Ok(self.authenticate(
+            HttpRequest::new(
+                Method::DELETE, API_ENDPOINT.to_owned() + path,
+                Duration::from_secs(API_REQUEST_TIMEOUT),
+                RawResponseReader::new(), JsonErrorReader::new())
+        )?)
     }
 
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
-        HttpRequest::new_json(Method::Put, location, Duration::from_secs(timeout))
+        HttpRequest::new_json(Method::PUT, location, Duration::from_secs(timeout))
     }
 }
 
@@ -317,8 +318,8 @@ impl WriteProvider for GoogleDrive {
     }
 
     fn create_directory(&self, path: &str) -> EmptyResult {
-        let content_type = ContentType(Mime::from_str(DIRECTORY_MIME_TYPE).unwrap());
-        let upload_url = self.start_file_upload(path, &content_type, false)?;
+        let content_type = DIRECTORY_MIME_TYPE;
+        let upload_url = self.start_file_upload(path, content_type, false)?;
         let request = self.file_upload_request(upload_url, API_REQUEST_TIMEOUT)
             .with_text_body(content_type, "")?;
         self.client.send(request)?;
@@ -336,11 +337,10 @@ impl WriteProvider for GoogleDrive {
                     assert!(file.is_none());
                     assert_eq!(offset, 0);
 
-                    let content_type = ContentType::octet_stream();
-                    let upload_url = self.start_file_upload(&temp_path, &content_type, true)?;
-
+                    let content_type = "application/octet-stream";
+                    let upload_url = self.start_file_upload(&temp_path, content_type, true)?;
                     let request = self.file_upload_request(upload_url, UPLOAD_REQUEST_TIMEOUT)
-                        .with_body(content_type, None, chunk_stream)?;
+                        .with_body(content_type, chunk_stream)?;
                     file = Some(self.client.send(request)?);
                 },
                 Ok(ChunkStream::EofWithCheckSum(size, checksum)) => {
@@ -357,7 +357,7 @@ impl WriteProvider for GoogleDrive {
                     }
 
                     let request = self.api_request(
-                        Method::Get, &"/files/".to_owned().add(&file.id).add("?fields=md5Checksum"))?;
+                        Method::GET, &"/files/".to_owned().add(&file.id).add("?fields=md5Checksum"))?;
                     let metadata: Metadata = self.client.send(request)?;
 
                     if metadata.md5_checksum != checksum {
@@ -373,7 +373,7 @@ impl WriteProvider for GoogleDrive {
                         name: &'a str,
                     }
                     let request = self.api_request(
-                        Method::Patch, &"/files/".to_owned().add(&file.id))?
+                        Method::PATCH, &"/files/".to_owned().add(&file.id))?
                         .with_json(&RenameRequest {
                             name: name,
                         })?;

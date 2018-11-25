@@ -1,22 +1,21 @@
+mod body;
+pub mod headers;
 mod readers;
 mod request;
 mod response;
 
 use std::error::Error;
 use std::fmt;
-use std::io;
-use std::time::{Instant, Duration};
+use std::time::Duration;
 
-use futures::{Future, Stream};
-use hyper::{self, Client, Body, Chunk};
-use hyper::header::{Header, UserAgent};
-use hyper_tls::HttpsConnector;
 use log;
-use tokio_core::reactor::{Core, Timeout};
+use reqwest::Client;
 
 use core::GenericResult;
 
-pub use hyper::{Method, Headers, StatusCode};
+pub use reqwest::{Method, StatusCode};
+pub use reqwest::header::{HeaderMap as Headers, HeaderName, HeaderValue};
+pub use self::body::*;
 pub use self::request::*;
 pub use self::response::*;
 pub use self::readers::*;
@@ -27,22 +26,23 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new() -> HttpClient {
-        let mut default_headers = Headers::new();
-        default_headers.set(UserAgent::new("pyvsb-to-cloud"));
-
         HttpClient {
-            default_headers: default_headers,
-        }
+            default_headers: Headers::new(),
+        }.with_default_header(headers::USER_AGENT, "pyvsb-to-cloud").unwrap()
     }
 
-    pub fn with_default_header<H: Header>(mut self, header: H) -> HttpClient {
-        self.default_headers.set(header);
-        self
+    pub fn with_default_header<V: AsRef<str>>(mut self, name: HeaderName, value: V) -> GenericResult<HttpClient> {
+        let value = value.as_ref().parse().map_err(|_| format!(
+            "Invalid {:?} header value", name.as_str()))?;
+        self.default_headers.insert(name, value);
+        Ok(self)
     }
 
-    pub fn send<R, E>(&self, request: HttpRequest<R, E>) -> Result<R, HttpClientError<E>> {
+    pub fn send<R, E>(&self, mut request: HttpRequest<R, E>) -> Result<R, HttpClientError<E>> {
         let mut headers = self.default_headers.clone();
-        headers.extend(request.headers.iter());
+        for (name, values) in request.headers.drain() {
+            headers.insert(name, values.last().unwrap());
+        }
 
         if log_enabled!(log::Level::Trace) {
             let mut extra_info = String::new();
@@ -50,7 +50,8 @@ impl HttpClient {
             if headers.len() != 0 {
                 extra_info += "\n";
                 extra_info += &headers.iter()
-                    .map(|header| header.to_string().trim_right_matches("\r\n").to_owned())
+                    .map(|(name, value)| format!(
+                        "{}: {}", name, value.to_str().unwrap_or("[non-ASCII data]")))
                     .collect::<Vec<_>>().join("\n");
             }
 
@@ -81,57 +82,29 @@ impl HttpClient {
         }
     }
 
-    fn send_request<I>(&self, method: Method, url: &str, headers: Headers, body: I,
-                       timeout: Duration) -> GenericResult<HttpResponse>
-        where I: Into<Body>
+    fn send_request(&self, method: Method, url: &str, headers: Headers, body: Option<Body>,
+                    timeout: Duration) -> GenericResult<HttpResponse>
     {
-        let url = url.parse()?;
+        let client = Client::builder().timeout(timeout).build().map_err(|e| format!(
+            "Unable to create HTTP client: {}", e))?;
 
-        let mut http_request = hyper::Request::new(method, url);
-        *http_request.headers_mut() = headers;
-        http_request.set_body(body);
+        let mut request = client.request(method, url).headers(headers);
+        if let Some(body) = body {
+            request = request.body(body);
+        }
 
-        // Attention:
-        // We create a new event loop per each request because hyper has a bug due to which in case
-        // when server responds before we complete sending our request (for example with 413 Payload
-        // Too Large status code), request body gets leaked probably somewhere in connection pool,
-        // so body's mpsc::Receiver doesn't gets closed and sender hangs on it forever.
-        let mut core = Core::new()?;
-        let handle = core.handle();
-        let https_connector = HttpsConnector::new(1, &handle)?;
-        let client = Client::configure().connector(https_connector).build(&handle);
-
-        // Sadly, but for now it seems to be impossible to set socket or per-chunk timeout in hyper,
-        // so we have to always operate with request timeout.
-        let timeout_time = Instant::now() + timeout;
-        let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
-            Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP request timeout"))
-        }).map_err(Into::into);
-
-        let response: hyper::Response = match core.run(client.request(http_request).select(timeout)) {
-            Ok((response, _)) => Ok(response),
-            Err((err, _)) => Err(err),
-        }?;
-
-        // Response::body() borrows Response, so we have to store all fields that we need later
+        let mut response = request.send()?;
         let status = response.status();
-        let response_headers = response.headers().clone();
 
-        let timeout = Timeout::new_at(timeout_time, &handle)?.and_then(|_| {
-            Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP response receiving timeout"))
-        }).map_err(Into::into);
+        let mut body = Vec::new();
+        response.copy_to(&mut body)?;
 
-        let body: Chunk = match core.run(response.body().concat2().select(timeout)) {
-            Ok((body, _)) => Ok(body),
-            Err((err, _)) => Err(err),
-        }?;
-        let body = body.to_vec();
         trace!("Got {} response: {}", status,
                String::from_utf8_lossy(&body).trim_right_matches('\n'));
 
         Ok(HttpResponse {
             status: status,
-            headers: response_headers,
+            headers: response.headers().clone(),
             body: body,
         })
     }

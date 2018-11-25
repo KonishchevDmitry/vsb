@@ -6,7 +6,6 @@ extern crate digest;
 extern crate easy_logging;
 extern crate futures;
 extern crate hyper;
-extern crate hyper_tls;
 #[macro_use] extern crate lazy_static;
 extern crate libc;
 #[macro_use] extern crate log;
@@ -14,6 +13,7 @@ extern crate md5;
 extern crate mime;
 extern crate nix;
 extern crate regex;
+extern crate reqwest;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
@@ -22,7 +22,6 @@ extern crate serde_yaml;
 extern crate sha2;
 extern crate shellexpand;
 extern crate tar;
-extern crate tokio_core;
 
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
@@ -104,7 +103,7 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
 
     let mut cloud_storage = match backup_config.provider {
         config::Provider::Dropbox {ref access_token} =>
-            Storage::new(Dropbox::new(&access_token), &backup_config.dst),
+            Storage::new(Dropbox::new(&access_token)?, &backup_config.dst),
         config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(GoogleDrive::new(&client_id, &client_secret, &refresh_token), &backup_config.dst),
     };

@@ -1,16 +1,15 @@
-use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
-use hyper::Body;
-use hyper::header::{Header, Raw, ContentLength, ContentType};
 use log;
 use serde::{ser, de};
 use serde_json;
 use serde_urlencoded;
 
-use super::{Method, Headers, ResponseReader, JsonReplyReader, JsonErrorReader};
+use super::{Method, Headers, HeaderName, Body, ResponseReader, JsonReplyReader, JsonErrorReader,
+            headers};
 
 pub struct HttpRequest<'a, R, E> {
     pub method: Method,
@@ -62,53 +61,46 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
         Ok(self)
     }
 
-    pub fn with_header<H: Header>(mut self, header: H) -> HttpRequest<'a, R, E> {
-        self.headers.set(header);
-        self
+    pub fn with_header<K: AsRef<str>, V:AsRef<str>>(mut self, name: K, value: V) -> HttpRequestBuildingResult<'a, R, E> {
+        let name = HeaderName::from_str(name.as_ref()).map_err(|_| HttpRequestBuildingError::new(format!(
+            "Invalid header name: {:?}", name.as_ref())))?;
+
+        let value = value.as_ref().parse().map_err(|_| HttpRequestBuildingError::new(format!(
+            "Invalid {:?} header value", name.as_str())))?;
+
+        self.headers.insert(name, value);
+        Ok(self)
     }
 
-    pub fn with_raw_header<K: Into<Cow<'static, str>>, V: Into<Raw>>(mut self, name: K, value: V) -> HttpRequest<'a, R, E> {
-        self.headers.set_raw(name, value);
-        self
-    }
-
-    pub fn with_body<B: Into<Body>>(mut self, content_type: ContentType, content_length: Option<u64>,
-                                    body: B) -> HttpRequestBuildingResult<'a, R, E> {
+    pub fn with_body<B: Into<Body>>(mut self, content_type: &str, body: B) -> HttpRequestBuildingResult<'a, R, E> {
         if self.body.is_some() {
             return Err(HttpRequestBuildingError::new("An attempt to set request body twice"))
         }
 
-        self.headers.set(content_type);
-        if let Some(content_length) = content_length {
-            self.headers.set(ContentLength(content_length));
-        }
-
         self.body = Some(body.into());
-
-        Ok(self)
+        Ok(self.with_header(headers::CONTENT_TYPE, content_type)?)
     }
 
-    pub fn with_text_body<B: Into<String>>(self, content_type: ContentType, body: B) -> HttpRequestBuildingResult<'a, R, E> {
-        let body = body.into();
-        let content_length = Some(body.len() as u64);
+    pub fn with_text_body<B: Into<String>>(self, content_type: &str, data: B) -> HttpRequestBuildingResult<'a, R, E> {
+        let body = data.into();
 
         Ok(if log_enabled!(log::Level::Trace) {
-            let mut request = self.with_body(content_type, content_length, body.clone())?;
+            let mut request = self.with_body(content_type, body.clone())?;
             request.trace_body = Some(body);
             request
         } else {
-            self.with_body(content_type, content_length, body)?
+            self.with_body(content_type, body)?
         })
     }
 
     pub fn with_form<B: ser::Serialize>(self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
         let body = serde_urlencoded::to_string(request).map_err(HttpRequestBuildingError::new)?;
-        Ok(self.with_text_body(ContentType::form_url_encoded(), body)?)
+        Ok(self.with_text_body("application/x-www-form-urlencoded", body)?)
     }
 
     pub fn with_json<B: ser::Serialize>(self, request: &B) -> HttpRequestBuildingResult<'a, R, E> {
         let body = serde_json::to_string(request).map_err(HttpRequestBuildingError::new)?;
-        Ok(self.with_text_body(ContentType::json(), body)?)
+        Ok(self.with_text_body("application/json", body)?)
     }
 }
 

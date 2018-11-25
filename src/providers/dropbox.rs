@@ -3,15 +3,13 @@ use std::fmt;
 use std::ops::Add;
 use std::time::Duration;
 
-use hyper::Body;
-use hyper::header::{Authorization, Bearer, ContentType};
 use serde::{ser, de};
 use serde_json;
 
 use core::{EmptyResult, GenericResult};
 use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, HttpRequest, HttpRequestBuildingError, Method, EmptyResponse,
-                  HttpClientError};
+use http_client::{HttpClient, HttpRequest, HttpRequestBuildingError, Method, Body, EmptyResponse,
+                  HttpClientError, headers};
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
@@ -26,11 +24,12 @@ pub struct Dropbox {
 }
 
 impl Dropbox {
-    pub fn new(access_token: &str) -> Dropbox {
-        Dropbox {
-            client: HttpClient::new().with_default_header(
-                Authorization(Bearer {token: access_token.to_owned()}))
-        }
+    pub fn new(access_token: &str) -> GenericResult<Dropbox> {
+        Ok(Dropbox {
+            client: HttpClient::new()
+                .with_default_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
+                .map_err(|_| "Invalid access token")?
+        })
     }
 
     fn rename_file(&self, src: &str, dst: &str) -> EmptyResult {
@@ -53,7 +52,7 @@ impl Dropbox {
               O: de::DeserializeOwned,
     {
         self.client.send(HttpRequest::new_json(
-            Method::Post, API_ENDPOINT.to_owned() + path,
+            Method::POST, API_ENDPOINT.to_owned() + path,
             Duration::from_secs(API_REQUEST_TIMEOUT)
         ).with_json(request)?)
     }
@@ -66,10 +65,10 @@ impl Dropbox {
         let request_json = serde_json::to_string(request).map_err(HttpRequestBuildingError::new)?;
 
         let http_request = HttpRequest::new_json(
-            Method::Post, CONTENT_ENDPOINT.to_owned() + path,
+            Method::POST, CONTENT_ENDPOINT.to_owned() + path,
             Duration::from_secs(CONTENT_REQUEST_TIMEOUT))
-            .with_raw_header("Dropbox-API-Arg", request_json)
-            .with_body(ContentType::octet_stream(), None, body)?;
+            .with_header("Dropbox-API-Arg", request_json)?
+            .with_body("application/octet-stream", body)?;
 
         self.client.send(http_request)
     }
