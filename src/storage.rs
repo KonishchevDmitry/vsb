@@ -14,7 +14,7 @@ use stream_splitter;
 use util;
 
 pub struct Storage {
-    provider: Box<AbstractProvider>,
+    provider: Box<dyn AbstractProvider>,
     path: String,
 }
 
@@ -60,7 +60,7 @@ impl Storage {
             }
 
             let group_name = &file.name;
-            let group_path = self.path.trim_right_matches('/').to_owned() + "/" + group_name;
+            let group_path = self.path.trim_end_matches('/').to_owned() + "/" + group_name;
 
             let (backups, mut backups_ok) = get_backups(provider, &group_path).map_err(|e| format!(
                 "Unable to list {:?} backup group: {}", group_path, e))?;
@@ -140,7 +140,7 @@ impl Storage {
     }
 
     pub fn get_backup_group_path(&self, group_name: &str) -> String {
-        self.path.trim_right_matches('/').to_owned() + "/" + group_name
+        self.path.trim_end_matches('/').to_owned() + "/" + group_name
     }
 
     pub fn get_backup_path(&self, group_name: &str, backup_name: &str) -> String {
@@ -204,7 +204,7 @@ impl BackupFileTraits {
     }
 }
 
-fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<String>, bool)> {
+fn get_backups(provider: &dyn ReadProvider, group_path: &str) -> GenericResult<(Vec<String>, bool)> {
     let (mut backups, mut ok) = (Vec::new(), true);
 
     let backup_file_traits = BackupFileTraits::get_for(provider.type_());
@@ -250,7 +250,7 @@ fn get_backups(provider: &ReadProvider, group_path: &str) -> GenericResult<(Vec<
     Ok((backups, ok))
 }
 
-fn validate_backup(provider: &ReadProvider, available_checksums: &mut HashSet<String>,
+fn validate_backup(provider: &dyn ReadProvider, available_checksums: &mut HashSet<String>,
                    backup_name: &str, backup_path: &str) -> GenericResult<bool> {
     let metadata_name = "metadata.bz2";
     let metadata_files: HashSet<String> = [metadata_name].iter().map(|&s| s.to_owned()).collect();
@@ -279,7 +279,7 @@ fn validate_backup(provider: &ReadProvider, available_checksums: &mut HashSet<St
     })
 }
 
-fn check_backup_consistency(provider: &ReadProvider, available_checksums: &mut HashSet<String>,
+fn check_backup_consistency(provider: &dyn ReadProvider, available_checksums: &mut HashSet<String>,
                             backup_name: &str, metadata_path: &str) -> GenericResult<bool> {
     if cfg!(debug_assertions) {
         warn!("Skip consistency check of {:?}: running in develop mode.", metadata_path);
@@ -345,8 +345,8 @@ fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) ->
 // Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
 // to emulate it via this trait.
 trait AbstractProvider {
-    fn read(&self) -> &ReadProvider;
-    fn write(&self) -> GenericResult<&WriteProvider>;
+    fn read(&self) -> &dyn ReadProvider;
+    fn write(&self) -> GenericResult<&dyn WriteProvider>;
 }
 
 struct ReadOnlyProviderAdapter<T: ReadProvider> {
@@ -354,11 +354,11 @@ struct ReadOnlyProviderAdapter<T: ReadProvider> {
 }
 
 impl<T: ReadProvider> AbstractProvider for ReadOnlyProviderAdapter<T> {
-    fn read(&self) -> &ReadProvider {
+    fn read(&self) -> &dyn ReadProvider {
         &self.provider
     }
 
-    fn write(&self) -> GenericResult<&WriteProvider> {
+    fn write(&self) -> GenericResult<&dyn WriteProvider> {
         Err!("An attempt to modify a read-only backup storage")
     }
 }
@@ -368,11 +368,11 @@ struct ReadWriteProviderAdapter<T: ReadProvider + WriteProvider> {
 }
 
 impl<T: ReadProvider + WriteProvider> AbstractProvider for ReadWriteProviderAdapter<T> {
-    fn read(&self) -> &ReadProvider {
+    fn read(&self) -> &dyn ReadProvider {
         &self.provider
     }
 
-    fn write(&self) -> GenericResult<&WriteProvider> {
+    fn write(&self) -> GenericResult<&dyn WriteProvider> {
         Ok(&self.provider)
     }
 }

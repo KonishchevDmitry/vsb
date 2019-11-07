@@ -309,7 +309,7 @@ impl ReadProvider for GoogleDrive {
 }
 
 impl WriteProvider for GoogleDrive {
-    fn hasher(&self) -> Box<Hasher> {
+    fn hasher(&self) -> Box<dyn Hasher> {
         Box::new(Md5::new())
     }
 
@@ -328,7 +328,7 @@ impl WriteProvider for GoogleDrive {
 
     fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
                    chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        let temp_path = directory_path.trim_right_matches('/').to_owned().add("/").add(temp_name);
+        let temp_path = directory_path.trim_end_matches('/').to_owned().add("/").add(temp_name);
         let mut file = None;
 
         for result in chunk_streams.iter() {
@@ -488,6 +488,6 @@ impl Error for GoogleDriveApiError {
 
 impl fmt::Display for GoogleDriveApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(), self.error.message.trim_right_matches('.'))
+        write!(f, "{}: {}", self.description(), self.error.message.trim_end_matches('.'))
     }
 }

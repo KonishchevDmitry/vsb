@@ -165,7 +165,7 @@ impl ReadProvider for Dropbox {
 }
 
 impl WriteProvider for Dropbox {
-    fn hasher(&self) -> Box<Hasher> {
+    fn hasher(&self) -> Box<dyn Hasher> {
         Box::new(ChunkedSha256::new(4 * 1024 * 1024))
     }
 
@@ -188,8 +188,8 @@ impl WriteProvider for Dropbox {
 
     fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
                    chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        let temp_path = directory_path.trim_right_matches('/').to_owned().add("/").add(temp_name);
-        let path = directory_path.trim_right_matches('/').to_owned().add("/").add(name);
+        let temp_path = directory_path.trim_end_matches('/').to_owned().add("/").add(temp_name);
+        let path = directory_path.trim_end_matches('/').to_owned().add("/").add(name);
 
         #[derive(Serialize)]
         struct StartRequest {
@@ -314,6 +314,6 @@ impl Error for ApiError {
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.description(),
-               self.error_summary.trim_right_matches(|c| c == '.' || c == '/'))
+               self.error_summary.trim_end_matches(|c| c == '.' || c == '/'))
     }
 }

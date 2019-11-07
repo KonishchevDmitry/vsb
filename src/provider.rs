@@ -13,13 +13,13 @@ pub trait Provider {
 pub trait ReadProvider: Provider {
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>>;
 
-    fn open_file(&self, _path: &str) -> GenericResult<Box<io::Read>> {
+    fn open_file(&self, _path: &str) -> GenericResult<Box<dyn io::Read>> {
         Err!("{} provider doesn't support file opening functionality", self.name())
     }
 }
 
 pub trait WriteProvider: Provider {
-    fn hasher(&self) -> Box<Hasher>;
+    fn hasher(&self) -> Box<dyn Hasher>;
     fn max_request_size(&self) -> Option<u64>;
 
     fn create_directory(&self, path: &str) -> EmptyResult;

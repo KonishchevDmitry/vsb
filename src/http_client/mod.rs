@@ -100,7 +100,7 @@ impl HttpClient {
         response.copy_to(&mut body)?;
 
         trace!("Got {} response: {}", status,
-               String::from_utf8_lossy(&body).trim_right_matches('\n'));
+               String::from_utf8_lossy(&body).trim_end_matches('\n'));
 
         Ok(HttpResponse {
             status: status,
@@ -146,8 +146,8 @@ impl<T> From<String> for HttpClientError<T> {
     }
 }
 
-impl<T> From<Box<Error + Send + Sync>> for HttpClientError<T> {
-    fn from(err: Box<Error + Send + Sync>) -> HttpClientError<T> {
+impl<T> From<Box<dyn Error + Send + Sync>> for HttpClientError<T> {
+    fn from(err: Box<dyn Error + Send + Sync>) -> HttpClientError<T> {
         HttpClientError::Generic(err.to_string())
     }
 }

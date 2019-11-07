@@ -20,8 +20,8 @@ pub struct HttpRequest<'a, R, E> {
     pub body: Option<Body>,
     pub trace_body: Option<String>,
 
-    pub reply_reader: Box<ResponseReader<Result=R> + 'a>,
-    pub error_reader: Box<ResponseReader<Result=E> + 'a>,
+    pub reply_reader: Box<dyn ResponseReader<Result=R> + 'a>,
+    pub error_reader: Box<dyn ResponseReader<Result=E> + 'a>,
 }
 
 pub type HttpRequestBuildingResult<'a, R, E> = Result<HttpRequest<'a, R, E>, HttpRequestBuildingError>;

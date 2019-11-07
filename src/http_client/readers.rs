@@ -64,7 +64,7 @@ impl<T: de::DeserializeOwned> JsonErrorReader<T> {
 
     fn read_plain_text_error(&self, response: HttpResponse) -> String {
         if let Ok(body) = String::from_utf8(response.body) {
-            let error = body.lines().next().unwrap_or("").trim_right_matches('.').trim();
+            let error = body.lines().next().unwrap_or("").trim_end_matches('.').trim();
             if !error.is_empty() {
                 return error.to_owned()
             }

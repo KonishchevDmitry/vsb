@@ -23,7 +23,7 @@ pub struct Encryptor {
 }
 
 impl Encryptor {
-    pub fn new(encryption_passphrase: &str, hasher: Box<Hasher>) -> GenericResult<(Encryptor, DataReceiver)> {
+    pub fn new(encryption_passphrase: &str, hasher: Box<dyn Hasher>) -> GenericResult<(Encryptor, DataReceiver)> {
         // Buffer is for the following reasons:
         // 1. Parallelization.
         // 2. To not block in drop() if we get some error during dropping the object that hasn't
@@ -175,7 +175,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     Ok((read_fd, write_fd))
 }
 
-fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
+fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<String> {
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
     let mut stderr = gpg.stderr.take().unwrap();
 
@@ -187,7 +187,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
                 if size == 0 {
                     Ok(())
                 } else {
-                    Err!("gpg error: {}", error.trim_right())
+                    Err!("gpg error: {}", error.trim_end())
                 }
             },
             Err(err) => Err!("gpg stderr reading error: {}", err),
@@ -212,7 +212,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<Hasher>, tx: DataSender) -> Generic
     Ok(checksum)
 }
 
-fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<Hasher>, tx: DataSender) -> GenericResult<String> {
+fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<String> {
     loop {
         let size = {
             let encrypted_data = stdout.fill_buf().map_err(|e| format!(
