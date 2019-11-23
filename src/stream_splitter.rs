@@ -4,8 +4,6 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use bytes::Bytes;
-use futures::{Future, Sink};
-use futures::sync::mpsc as futures_mpsc;
 use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
@@ -27,7 +25,7 @@ pub enum ChunkStream {
 pub type ChunkStreamSender = mpsc::SyncSender<Result<ChunkStream, String>>;
 pub type ChunkStreamReceiver = mpsc::Receiver<Result<ChunkStream, String>>;
 
-pub type ChunkReceiver = futures_mpsc::Receiver<ChunkResult>;
+pub type ChunkReceiver = mpsc::Receiver<ChunkResult>;
 pub type ChunkResult = Result<Chunk, hyper::Error>;
 
 pub fn split(data_stream: DataReceiver, stream_max_size: Option<u64>)
@@ -79,7 +77,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
             }
 
             if chunk_stream.is_none() {
-                let (tx, rx) = futures_mpsc::channel(0);
+                let (tx, rx) = mpsc::sync_channel(0);
 
                 chunk_stream = Some(tx);
                 stream_size = 0;
@@ -93,7 +91,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
             };
 
             if available_size >= data_size {
-                chunk_stream = Some(chunk_stream.unwrap().send(Ok(data.into())).wait()?);
+                chunk_stream.as_mut().unwrap().send(Ok(data.into()))?;
                 stream_size += data_size;
                 offset += data_size;
                 break;
@@ -101,7 +99,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
 
             if available_size > 0 {
                 chunk_stream.take().unwrap().send(
-                    Ok(data.slice_to(available_size as usize).into())).wait()?;
+                    Ok(data.slice_to(available_size as usize).into()))?;
                 data = data.slice_from(available_size as usize);
                 stream_size += available_size;
                 offset += available_size;
@@ -136,11 +134,5 @@ impl fmt::Display for StreamSplitterError {
 impl<T> From<mpsc::SendError<T>> for StreamSplitterError {
     fn from(_err: mpsc::SendError<T>) -> StreamSplitterError {
         StreamSplitterError("Unable to send a new stream: the receiver has been closed")
-    }
-}
-
-impl<T> From<futures_mpsc::SendError<T>> for StreamSplitterError {
-    fn from(_err: futures_mpsc::SendError<T>) -> StreamSplitterError {
-        StreamSplitterError("Unable to send a new chunk: the receiver has been closed")
     }
 }

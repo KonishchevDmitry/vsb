@@ -4,7 +4,6 @@ extern crate chrono;
 extern crate clap;
 extern crate digest;
 extern crate easy_logging;
-extern crate futures;
 extern crate hyper;
 #[macro_use] extern crate lazy_static;
 extern crate libc;

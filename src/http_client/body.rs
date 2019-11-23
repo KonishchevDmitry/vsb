@@ -1,15 +1,14 @@
 use std::io;
+use std::sync::mpsc;
 
 use bytes::Buf;
-use futures;
-use futures::Stream;
 use hyper::{self, Chunk};
 use reqwest;
 
 use core::GenericResult;
 
 type Message = Result<Chunk, hyper::Error>;
-type ChunkStream = futures::sync::mpsc::Receiver<Message>;
+type ChunkStream = mpsc::Receiver<Message>;
 
 pub enum Body {
     String(String),
@@ -39,7 +38,7 @@ impl Into<reqwest::Body> for Body {
         match self {
             Body::String(data) => data.into(),
             Body::Stream(stream) => reqwest::Body::new(StreamReader {
-                stream: stream.wait(),
+                stream: stream,
                 current_chunk: None,
             })
         }
@@ -47,17 +46,16 @@ impl Into<reqwest::Body> for Body {
 }
 
 struct StreamReader {
-    stream: futures::stream::Wait<ChunkStream>,
+    stream: ChunkStream,
     current_chunk: Option<Chunk>,
 }
 
 impl StreamReader {
     fn get_current_chunk(&mut self) -> GenericResult<Option<&mut Chunk>> {
         if self.current_chunk.is_none() {
-            let message: Message = match self.stream.next() {
-                Some(result) => result.map_err(|_|
-                    "Unable to receive a new chunk: the sender has been closed")?,
-                None => return Ok(None),
+            let message: Message = match self.stream.recv() {
+                Ok(message) => message,
+                Err(mpsc::RecvError) => return Ok(None),
             };
 
             self.current_chunk = Some(message?);
