@@ -4,7 +4,6 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use bytes::Bytes;
-use hyper::{self, Chunk};
 
 use core::{EmptyResult, GenericResult};
 use util;
@@ -26,7 +25,7 @@ pub type ChunkStreamSender = mpsc::SyncSender<Result<ChunkStream, String>>;
 pub type ChunkStreamReceiver = mpsc::Receiver<Result<ChunkStream, String>>;
 
 pub type ChunkReceiver = mpsc::Receiver<ChunkResult>;
-pub type ChunkResult = Result<Chunk, hyper::Error>;
+pub type ChunkResult = Result<Bytes, String>;
 
 pub fn split(data_stream: DataReceiver, stream_max_size: Option<u64>)
     -> GenericResult<(ChunkStreamReceiver, JoinHandle<EmptyResult>)>
@@ -61,9 +60,6 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
                 break;
             },
             Err(err) => {
-                // Attention:
-                // We can't send errors via chunk streams, because it's not supported yet: tokio
-                // panics here - https://github.com/tokio-rs/tokio-proto/blob/42ddd45cd34fde8ddd12bdf49a8147762787bf33/src/streaming/pipeline/advanced.rs#L329
                 chunk_stream.take();
                 chunk_streams.send(Err(err))?;
                 break;
@@ -91,15 +87,14 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
             };
 
             if available_size >= data_size {
-                chunk_stream.as_mut().unwrap().send(Ok(data.into()))?;
+                chunk_stream.as_mut().unwrap().send(Ok(data))?;
                 stream_size += data_size;
                 offset += data_size;
                 break;
             }
 
             if available_size > 0 {
-                chunk_stream.take().unwrap().send(
-                    Ok(data.slice_to(available_size as usize).into()))?;
+                chunk_stream.take().unwrap().send(Ok(data.slice_to(available_size as usize)))?;
                 data = data.slice_from(available_size as usize);
                 stream_size += available_size;
                 offset += available_size;

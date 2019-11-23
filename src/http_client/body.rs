@@ -1,13 +1,12 @@
 use std::io;
 use std::sync::mpsc;
 
-use bytes::Buf;
-use hyper::{self, Chunk};
+use bytes::Bytes;
 use reqwest;
 
 use core::GenericResult;
 
-type Message = Result<Chunk, hyper::Error>;
+type Message = Result<Bytes, String>;
 type ChunkStream = mpsc::Receiver<Message>;
 
 pub enum Body {
@@ -47,18 +46,18 @@ impl Into<reqwest::Body> for Body {
 
 struct StreamReader {
     stream: ChunkStream,
-    current_chunk: Option<Chunk>,
+    current_chunk: Option<Bytes>,
 }
 
 impl StreamReader {
-    fn get_current_chunk(&mut self) -> GenericResult<Option<&mut Chunk>> {
+    fn get_current_chunk(&mut self) -> GenericResult<Option<&mut Bytes>> {
         if self.current_chunk.is_none() {
-            let message: Message = match self.stream.recv() {
-                Ok(message) => message,
+            let chunk = match self.stream.recv() {
+                Ok(message) => message?,
                 Err(mpsc::RecvError) => return Ok(None),
             };
 
-            self.current_chunk = Some(message?);
+            self.current_chunk = Some(chunk);
         }
 
         Ok(Some(self.current_chunk.as_mut().unwrap()))
@@ -68,22 +67,22 @@ impl StreamReader {
 impl io::Read for StreamReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let (empty, size) = {
-            let chunk = self.get_current_chunk().map_err(|e|
-                io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            let data = self.get_current_chunk().map_err(|e|
+                io::Error::new(io::ErrorKind::Other, e))?;
 
-            let chunk = match chunk {
-                Some(chunk) => chunk,
+            let data: &mut Bytes = match data {
+                Some(data) => data,
                 None => return Ok(0),
             };
 
-            let chunk_size = chunk.remaining();
-            assert_ne!(chunk_size, 0);
+            let data_size = data.len();
+            assert_ne!(data_size, 0);
 
-            let size = std::cmp::min(buf.len(), chunk_size);
-            buf[..size].copy_from_slice(&chunk.bytes()[..size]);
-            chunk.advance(size);
+            let size = std::cmp::min(buf.len(), data_size);
+            buf[..size].copy_from_slice(&data[..size]);
+            data.advance(size);
 
-            (chunk.remaining() == 0, size)
+            (data.is_empty(), size)
         };
 
         if empty {
