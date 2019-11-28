@@ -1,7 +1,7 @@
 use std::io;
 use std::sync::mpsc;
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use reqwest;
 
 use core::GenericResult;

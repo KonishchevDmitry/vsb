@@ -94,8 +94,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
             }
 
             if available_size > 0 {
-                chunk_stream.take().unwrap().send(Ok(data.slice_to(available_size as usize)))?;
-                data = data.slice_from(available_size as usize);
+                chunk_stream.take().unwrap().send(Ok(data.split_to(available_size as usize)))?;
                 stream_size += available_size;
                 offset += available_size;
             } else {

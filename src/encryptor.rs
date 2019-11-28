@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time;
 
+use bytes::Bytes;
 use libc::pid_t;
 use nix::{fcntl, unistd};
 
@@ -225,7 +226,7 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<dyn Hasher>, tx
             hasher.write_all(encrypted_data).map_err(|e| format!(
                 "Unable to hash encrypted data: {}", e))?;
 
-            tx.send(Ok(Data::Payload(encrypted_data.into()))).map_err(|_|
+            tx.send(Ok(Data::Payload(Bytes::copy_from_slice(encrypted_data)))).map_err(|_|
                 "Unable to send encrypted data: the receiver has been closed".to_owned())?;
 
             encrypted_data.len()
