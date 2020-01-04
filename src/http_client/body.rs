@@ -32,11 +32,11 @@ impl From<ChunkStream> for Body {
     }
 }
 
-impl Into<reqwest::Body> for Body {
-    fn into(self) -> reqwest::Body {
+impl Into<reqwest::blocking::Body> for Body {
+    fn into(self) -> reqwest::blocking::Body {
         match self {
             Body::String(data) => data.into(),
-            Body::Stream(stream) => reqwest::Body::new(StreamReader {
+            Body::Stream(stream) => reqwest::blocking::Body::new(StreamReader {
                 stream: stream,
                 current_chunk: None,
             })

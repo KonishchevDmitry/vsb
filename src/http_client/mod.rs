@@ -9,7 +9,7 @@ use std::fmt;
 use std::time::Duration;
 
 use log;
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 use core::GenericResult;
 
@@ -40,8 +40,8 @@ impl HttpClient {
 
     pub fn send<R, E>(&self, mut request: HttpRequest<R, E>) -> Result<R, HttpClientError<E>> {
         let mut headers = self.default_headers.clone();
-        for (name, values) in request.headers.drain() {
-            headers.insert(name, values.last().unwrap());
+        for (name, value) in request.headers.drain() {
+            headers.insert(name.unwrap(), value);
         }
 
         if log_enabled!(log::Level::Trace) {

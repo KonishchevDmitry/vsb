@@ -17,7 +17,7 @@ md-5 = "*"
 mime = "*"
 nix = "*"
 regex = "*"
-reqwest = "*"
+reqwest = { version = "*", features = ["blocking"] }
 serde = "*"
 serde_derive = "*"
 serde_json = "*"
