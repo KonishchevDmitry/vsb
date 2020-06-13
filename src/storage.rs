@@ -72,7 +72,7 @@ impl Storage {
                 backup_group.extend(backups.iter().cloned());
                 let first_backup_name = backup_group.iter().next().unwrap();
 
-                if first_backup_name.split("-").next().unwrap() != group_name {
+                if first_backup_name.split('-').next().unwrap() != group_name {
                     error!(concat!(
                         "Suspicious first backup ({:?}) in {:?} group on {}: ",
                         "a possibly corrupted backup group."
@@ -150,9 +150,10 @@ impl Storage {
     fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {
         let extension = BackupFileTraits::get_for(self.provider.read().type_()).extension;
 
-        let prefix = match temporary {
-            true => ".",
-            false => "",
+        let prefix = if temporary {
+            "."
+        } else {
+            ""
         }.to_owned();
 
         prefix + backup_name + extension
@@ -295,7 +296,7 @@ fn check_backup_consistency(provider: &dyn ReadProvider, available_checksums: &m
         let line = line.map_err(|e| format!("Error while reading metadata file: {}", e))?;
         files += 1;
 
-        let mut parts = line.splitn(4, " ");
+        let mut parts = line.splitn(4, ' ');
         let checksum = parts.next();
         let status = parts.next();
         let fingerprint = parts.next();
@@ -332,11 +333,11 @@ fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) ->
 
     if let Err(err) = archive.append_dir_all(backup_name, backup_path) {
         let _ = archive.finish();
-        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err().into());
+        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err());
     }
 
     if let Err(err) = archive.finish() {
-        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err().into());
+        return Err(archive.into_inner().unwrap().finish(Some(err.to_string())).unwrap_err());
     }
 
     archive.into_inner().unwrap().finish(None)

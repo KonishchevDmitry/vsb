@@ -20,7 +20,7 @@ struct AccessToken {
     expire_time: Instant,
 }
 
-const API_ENDPOINT: &'static str = "https://accounts.google.com/o/oauth2";
+const API_ENDPOINT: &str = "https://accounts.google.com/o/oauth2";
 const API_REQUEST_TIMEOUT: u64 = 5;
 
 impl GoogleOauth {
@@ -88,13 +88,10 @@ struct GoogleOauthApiError {
 }
 
 impl Error for GoogleOauthApiError {
-    fn description(&self) -> &str {
-        "Google OAuth error"
-    }
 }
 
 impl fmt::Display for GoogleOauthApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(), self.error_description)
+        write!(f, "Google OAuth error: {}", self.error_description)
     }
 }

@@ -70,7 +70,7 @@ impl<T: de::DeserializeOwned> JsonErrorReader<T> {
             }
         }
 
-        return response.status.to_string();
+        response.status.to_string()
     }
 }
 

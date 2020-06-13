@@ -115,7 +115,7 @@ fn load_config(path: &str) -> GenericResult<Config> {
             return Err!("Maximum backup groups number must be positive");
         }
 
-        if backup.encryption_passphrase.len() == 0 {
+        if backup.encryption_passphrase.is_empty() {
             return Err!("Encryption passphrase mustn't be empty");
         }
     }
@@ -125,7 +125,7 @@ fn load_config(path: &str) -> GenericResult<Config> {
 
 fn validate_name(mut name: &str) -> GenericResult<String> {
     name = name.trim();
-    if name.len() == 0 {
+    if name.is_empty() {
         return Err!("Backup name mustn't be empty");
     }
     Ok(name.to_owned())

@@ -13,10 +13,10 @@ use http_client::{HttpClient, HttpRequest, HttpRequestBuildingError, Method, Bod
 use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-const API_ENDPOINT: &'static str = "https://api.dropboxapi.com/2";
+const API_ENDPOINT: &str = "https://api.dropboxapi.com/2";
 const API_REQUEST_TIMEOUT: u64 = 15;
 
-const CONTENT_ENDPOINT: &'static str = "https://content.dropboxapi.com/2";
+const CONTENT_ENDPOINT: &str = "https://content.dropboxapi.com/2";
 const CONTENT_REQUEST_TIMEOUT: u64 = 60 * 60;
 
 pub struct Dropbox {
@@ -306,14 +306,10 @@ struct PathError {
 }
 
 impl Error for ApiError {
-    fn description(&self) -> &str {
-        "Dropbox API error"
-    }
 }
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(),
-               self.error_summary.trim_end_matches(|c| c == '.' || c == '/'))
+        write!(f, "Dropbox API error: {}", self.error_summary.trim_end_matches(|c| c == '.' || c == '/'))
     }
 }

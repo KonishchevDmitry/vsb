@@ -34,7 +34,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
     {
         HttpRequest {
             method: method,
-            url: url.to_owned(),
+            url: url,
             headers: Headers::new(),
             body: None,
             timeout: timeout,
@@ -120,14 +120,11 @@ impl HttpRequestBuildingError {
 }
 
 impl Error for HttpRequestBuildingError {
-    fn description(&self) -> &str {
-        "HTTP request building error"
-    }
 }
 
 impl fmt::Display for HttpRequestBuildingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(), self.0)
+        write!(f, "HTTP request building error: {}", self.0)
     }
 }
 

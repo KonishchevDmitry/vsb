@@ -17,10 +17,10 @@ use stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 use self::oauth::GoogleOauth;
 
-const API_ENDPOINT: &'static str = "https://www.googleapis.com/drive/v3";
+const API_ENDPOINT: &str = "https://www.googleapis.com/drive/v3";
 const API_REQUEST_TIMEOUT: u64 = 15;
 
-const UPLOAD_ENDPOINT: &'static str = "https://www.googleapis.com/upload/drive/v3";
+const UPLOAD_ENDPOINT: &str = "https://www.googleapis.com/upload/drive/v3";
 const UPLOAD_REQUEST_TIMEOUT: u64 = 60 * 60;
 
 pub struct GoogleDrive {
@@ -113,7 +113,7 @@ impl GoogleDrive {
             None => None,
         };
 
-        return Ok((parent.id, name, file_id))
+        Ok((parent.id, name, file_id))
     }
 
     fn stat_path(&self, path: &str) -> GenericResult<Option<GoogleDriveFile>> {
@@ -401,7 +401,7 @@ impl WriteProvider for GoogleDrive {
     }
 }
 
-const DIRECTORY_MIME_TYPE: &'static str = "application/vnd.google-apps.folder";
+const DIRECTORY_MIME_TYPE: &str = "application/vnd.google-apps.folder";
 
 #[derive(Deserialize, Clone)]
 struct GoogleDriveFile {
@@ -446,12 +446,6 @@ enum GoogleDriveError {
 }
 
 impl Error for GoogleDriveError {
-    fn description(&self) -> &str {
-        match *self {
-            GoogleDriveError::Oauth(_) => "Google OAuth error",
-            GoogleDriveError::Api(ref e) => e.description(),
-        }
-    }
 }
 
 impl fmt::Display for GoogleDriveError {
@@ -481,13 +475,10 @@ struct GoogleDriveApiErrorObject {
 }
 
 impl Error for GoogleDriveApiError {
-    fn description(&self) -> &str {
-        "Google Drive error"
-    }
 }
 
 impl fmt::Display for GoogleDriveApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.description(), self.error.message.trim_end_matches('.'))
+        write!(f, "Google Drive error: {}", self.error.message.trim_end_matches('.'))
     }
 }

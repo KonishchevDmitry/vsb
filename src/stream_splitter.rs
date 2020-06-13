@@ -103,7 +103,7 @@ fn splitter(data_stream: DataReceiver, chunk_streams: ChunkStreamSender,
         }
     }
 
-    if let Ok(_) = data_stream.recv() {
+    if data_stream.recv().is_ok() {
         return Err(StreamSplitterError("Got a message after a termination message"))
     }
 

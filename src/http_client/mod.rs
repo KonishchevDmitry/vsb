@@ -47,7 +47,7 @@ impl HttpClient {
         if log_enabled!(log::Level::Trace) {
             let mut extra_info = String::new();
 
-            if headers.len() != 0 {
+            if !headers.is_empty() {
                 extra_info += "\n";
                 extra_info += &headers.iter()
                     .map(|(name, value)| format!(
@@ -117,12 +117,6 @@ pub enum HttpClientError<T> {
 }
 
 impl<T: Error> Error for HttpClientError<T> {
-    fn description(&self) -> &str {
-        match *self {
-            HttpClientError::Generic(_) => "HTTP client error",
-            HttpClientError::Api(ref e) => e.description(),
-        }
-    }
 }
 
 impl<T: fmt::Display> fmt::Display for HttpClientError<T> {
