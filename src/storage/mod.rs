@@ -1,3 +1,4 @@
+mod adapters;
 mod helpers;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -14,6 +15,9 @@ use crate::provider::{ProviderType, ReadProvider, WriteProvider, FileType};
 use crate::stream_splitter;
 use crate::util;
 
+use self::adapters::{AbstractProvider, ReadOnlyProviderAdapter, ReadWriteProviderAdapter};
+use self::helpers::BackupFileTraits;
+
 pub struct Storage {
     provider: Box<dyn AbstractProvider>,
     path: String,
@@ -22,14 +26,14 @@ pub struct Storage {
 impl Storage {
     pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> Storage {
         Storage {
-            provider: Box::new(ReadWriteProviderAdapter{provider: provider}),
+            provider: ReadWriteProviderAdapter::new(provider),
             path: path.to_owned(),
         }
     }
 
     pub fn new_read_only<T: ReadProvider +'static>(provider: T, path: &str) -> Storage {
         Storage {
-            provider: Box::new(ReadOnlyProviderAdapter{provider: provider}),
+            provider: ReadOnlyProviderAdapter::new(provider),
             path: path.to_owned(),
         }
     }
@@ -171,41 +175,6 @@ impl Storage {
 pub type BackupGroups = BTreeMap<String, Backups>;
 pub type Backups = BTreeSet<String>;
 
-struct BackupFileTraits {
-    type_: FileType,
-    extension: &'static str,
-    name_re: Regex,
-}
-
-impl BackupFileTraits {
-    fn get_for(provider_type: ProviderType) -> &'static BackupFileTraits {
-        lazy_static! {
-            static ref LOCAL_TRAITS: BackupFileTraits = BackupFileTraits {
-                type_: FileType::Directory,
-                extension: "",
-                name_re: BackupFileTraits::get_name_re(""),
-            };
-
-            static ref CLOUD_TRAITS: BackupFileTraits = BackupFileTraits {
-                type_: FileType::File,
-                extension: ".tar.gpg",
-                name_re: BackupFileTraits::get_name_re(".tar.gpg"),
-            };
-        }
-
-        match provider_type {
-            ProviderType::Local => &LOCAL_TRAITS,
-            ProviderType::Cloud => &CLOUD_TRAITS,
-        }
-    }
-
-    fn get_name_re(extension: &str) -> Regex {
-        let regex = r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
-            + &regex::escape(extension) + "$";
-        Regex::new(&regex).unwrap()
-    }
-}
-
 fn get_backups(provider: &dyn ReadProvider, group_path: &str) -> GenericResult<(Vec<String>, bool)> {
     let (mut backups, mut ok) = (Vec::new(), true);
 
@@ -342,39 +311,4 @@ fn archive_backup(backup_name: &str, backup_path: &str, encryptor: Encryptor) ->
     }
 
     archive.into_inner().unwrap().finish(None)
-}
-
-// Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
-// to emulate it via this trait.
-trait AbstractProvider {
-    fn read(&self) -> &dyn ReadProvider;
-    fn write(&self) -> GenericResult<&dyn WriteProvider>;
-}
-
-struct ReadOnlyProviderAdapter<T: ReadProvider> {
-    provider: T,
-}
-
-impl<T: ReadProvider> AbstractProvider for ReadOnlyProviderAdapter<T> {
-    fn read(&self) -> &dyn ReadProvider {
-        &self.provider
-    }
-
-    fn write(&self) -> GenericResult<&dyn WriteProvider> {
-        Err!("An attempt to modify a read-only backup storage")
-    }
-}
-
-struct ReadWriteProviderAdapter<T: ReadProvider + WriteProvider> {
-    provider: T,
-}
-
-impl<T: ReadProvider + WriteProvider> AbstractProvider for ReadWriteProviderAdapter<T> {
-    fn read(&self) -> &dyn ReadProvider {
-        &self.provider
-    }
-
-    fn write(&self) -> GenericResult<&dyn WriteProvider> {
-        Ok(&self.provider)
-    }
 }

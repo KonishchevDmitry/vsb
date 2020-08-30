@@ -28,7 +28,10 @@ main() {
     # A workaround to force recheck
     touch src/main.rs
 
-    blacklist='redundant_field_names'
+    blacklist='
+        redundant_field_names
+        new-ret-no-self
+    '
     check --bins "$blacklist"
     check '--bins --release' "$blacklist"
     check --tests "$blacklist"
