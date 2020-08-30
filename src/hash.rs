@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
-use digest::FixedOutput;
+use digest::Digest;
 use md5;
-use sha2::{self, Digest};
+use sha2;
 
 pub trait Hasher: Write + Send {
     fn finish(self: Box<Self>) -> String;
@@ -17,7 +17,7 @@ pub struct ChunkedSha256 {
 impl ChunkedSha256 {
     pub fn new(block_size: usize) -> ChunkedSha256 {
         ChunkedSha256 {
-            block_size: block_size,
+            block_size,
             block_hasher: None,
             result_hasher: sha2::Sha256::default(),
         }
@@ -25,7 +25,7 @@ impl ChunkedSha256 {
 
     fn consume_block(&mut self) {
         if let Some(block_hasher) = self.block_hasher.take() {
-            self.result_hasher.input(block_hasher.hasher.result().as_slice());
+            self.result_hasher.update(block_hasher.hasher.finalize().as_slice());
         }
     }
 }
@@ -43,8 +43,8 @@ impl Write for ChunkedSha256 {
                 let available_size = self.block_size;
 
                 self.block_hasher = Some(BlockHasher {
-                    hasher: sha2::Sha256::default(),
-                    available_size: available_size,
+                    hasher: sha2::Sha256::new(),
+                    available_size,
                 });
 
                 available_size
@@ -53,11 +53,11 @@ impl Write for ChunkedSha256 {
 
         let consumed_size = if data_size < available_size {
             let block_hasher = self.block_hasher.as_mut().unwrap();
-            block_hasher.hasher.input(buf);
+            block_hasher.hasher.update(buf);
             block_hasher.available_size -= data_size;
             data_size
         } else {
-            self.block_hasher.as_mut().unwrap().hasher.input(&buf[..available_size]);
+            self.block_hasher.as_mut().unwrap().hasher.update(&buf[..available_size]);
             self.consume_block();
             available_size
         };
@@ -73,7 +73,7 @@ impl Write for ChunkedSha256 {
 impl Hasher for ChunkedSha256 {
     fn finish(mut self: Box<Self>) -> String {
         self.consume_block();
-        format!("{:x}", self.result_hasher.result())
+        format!("{:x}", self.result_hasher.finalize())
     }
 }
 
@@ -88,7 +88,7 @@ pub struct Md5 {
 
 impl Md5 {
     pub fn new() -> Md5 {
-        Md5 {hasher: md5::Md5::default()}
+        Md5 {hasher: md5::Md5::new()}
     }
 }
 
@@ -104,6 +104,6 @@ impl Write for Md5 {
 
 impl Hasher for Md5 {
     fn finish(self: Box<Self>) -> String {
-        format!("{:x}", self.hasher.fixed_result())
+        format!("{:x}", self.hasher.finalize())
     }
 }
