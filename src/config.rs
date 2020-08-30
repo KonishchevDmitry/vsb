@@ -6,14 +6,10 @@ use std::process;
 use std::time::Duration;
 
 use clap::{App, Arg, AppSettings};
-use log;
 use regex::Regex;
 use serde::de::{self, Deserializer, Visitor};
-use serde_yaml;
-use shellexpand;
 
-use core::GenericResult;
-use easy_logging;
+use crate::core::GenericResult;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -1,8 +1,6 @@
 use std::io::{self, Write};
 
 use digest::Digest;
-use md5;
-use sha2;
 
 pub trait Hasher: Write + Send {
     fn finish(self: Box<Self>) -> String;

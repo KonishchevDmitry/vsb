@@ -1,8 +1,8 @@
 use std::fs;
 use std::io;
 
-use core::GenericResult;
-use provider::{Provider, ProviderType, ReadProvider, File, FileType};
+use crate::core::GenericResult;
+use crate::provider::{Provider, ProviderType, ReadProvider, File, FileType};
 
 pub struct Filesystem {
 }

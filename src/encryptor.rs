@@ -10,10 +10,10 @@ use bytes::Bytes;
 use libc::pid_t;
 use nix::{fcntl, unistd};
 
-use core::{EmptyResult, GenericResult};
-use hash::Hasher;
-use stream_splitter::{DataSender, DataReceiver, Data};
-use util;
+use crate::core::{EmptyResult, GenericResult};
+use crate::hash::Hasher;
+use crate::stream_splitter::{DataSender, DataReceiver, Data};
+use crate::util;
 
 pub struct Encryptor {
     pid: pid_t,

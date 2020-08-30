@@ -1,9 +1,9 @@
 use std::fmt;
 use std::io;
 
-use core::{GenericResult, EmptyResult};
-use hash::Hasher;
-use stream_splitter::ChunkStreamReceiver;
+use crate::core::{GenericResult, EmptyResult};
+use crate::hash::Hasher;
+use crate::stream_splitter::ChunkStreamReceiver;
 
 pub trait Provider {
     fn name(&self) -> &'static str;

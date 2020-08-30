@@ -8,10 +8,9 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use log;
 use reqwest::blocking::Client;
 
-use core::GenericResult;
+use crate::core::GenericResult;
 
 pub use reqwest::{Method, StatusCode};
 pub use reqwest::header::{HeaderMap as Headers, HeaderName, HeaderValue};

@@ -4,14 +4,15 @@ use std::ops::Add;
 use std::time::Duration;
 
 use serde::{ser, de};
-use serde_json;
 
-use core::{EmptyResult, GenericResult};
-use hash::{Hasher, ChunkedSha256};
-use http_client::{HttpClient, HttpRequest, HttpRequestBuildingError, Method, Body, EmptyResponse,
-                  HttpClientError, headers};
-use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use stream_splitter::{ChunkStreamReceiver, ChunkStream};
+use crate::core::{EmptyResult, GenericResult};
+use crate::hash::{Hasher, ChunkedSha256};
+use crate::http_client::{
+    HttpClient, HttpRequest, HttpRequestBuildingError, Method, Body, EmptyResponse, HttpClientError,
+    headers,
+};
+use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 const API_ENDPOINT: &str = "https://api.dropboxapi.com/2";
 const API_REQUEST_TIMEOUT: u64 = 15;

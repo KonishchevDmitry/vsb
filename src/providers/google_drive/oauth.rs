@@ -3,8 +3,8 @@ use std::error::Error;
 use std::fmt;
 use std::time::{Instant, Duration};
 
-use core::GenericResult;
-use http_client::{HttpClient, HttpRequest, Method};
+use crate::core::GenericResult;
+use crate::http_client::{HttpClient, HttpRequest, Method};
 
 pub struct GoogleOauth {
     client_id: String,

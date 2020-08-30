@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use serde::de;
 
-use core::{EmptyResult, GenericResult};
-use hash::{Hasher, Md5};
-use http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest, RawResponseReader,
-                  JsonErrorReader, HttpClientError, headers};
-use provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use stream_splitter::{ChunkStreamReceiver, ChunkStream};
+use crate::core::{EmptyResult, GenericResult};
+use crate::hash::{Hasher, Md5};
+use crate::http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest,
+                         RawResponseReader, JsonErrorReader, HttpClientError, headers};
+use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
 use self::oauth::GoogleOauth;
 

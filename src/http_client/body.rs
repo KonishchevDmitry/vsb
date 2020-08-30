@@ -2,9 +2,8 @@ use std::io;
 use std::sync::mpsc;
 
 use bytes::{Buf, Bytes};
-use reqwest;
 
-use core::GenericResult;
+use crate::core::GenericResult;
 
 type Message = Result<Bytes, String>;
 type ChunkStream = mpsc::Receiver<Message>;

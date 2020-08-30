@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use storage::{Storage, BackupGroups};
+use crate::storage::{Storage, BackupGroups};
 
 pub fn check_backups(storage: &Storage, backup_groups: &BackupGroups, consistent: bool,
                      max_time_without_backups: Option<Duration>) {

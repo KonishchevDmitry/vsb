@@ -1,5 +1,3 @@
-use std;
-
 pub type EmptyResult = GenericResult<()>;
 pub type GenericResult<T> = Result<T, GenericError>;
 pub type GenericError = Box<dyn std::error::Error + Send + Sync>;

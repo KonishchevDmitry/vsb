@@ -1,5 +1,5 @@
-use core::EmptyResult;
-use storage::{Storage, BackupGroups, Backups};
+use crate::core::EmptyResult;
+use crate::storage::{Storage, BackupGroups, Backups};
 
 pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
                     cloud_storage: &mut Storage, cloud_groups: &BackupGroups,

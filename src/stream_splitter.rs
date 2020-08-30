@@ -5,8 +5,8 @@ use std::thread::JoinHandle;
 
 use bytes::Bytes;
 
-use core::{EmptyResult, GenericResult};
-use util;
+use crate::core::{EmptyResult, GenericResult};
+use crate::util;
 
 pub enum Data {
     Payload(Bytes),

@@ -3,9 +3,8 @@ use std::str::FromStr;
 
 use mime::Mime;
 use serde::de;
-use serde_json;
 
-use core::GenericResult;
+use crate::core::GenericResult;
 
 use super::headers;
 use super::response::HttpResponse;

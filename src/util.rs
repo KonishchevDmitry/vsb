@@ -6,7 +6,7 @@ use nix::Error::Sys;
 use nix::errno::Errno;
 use nix::{sys, unistd};
 
-use core::{EmptyResult, GenericResult};
+use crate::core::{EmptyResult, GenericResult};
 
 pub fn spawn_thread<F, T>(name: &str, f: F) -> GenericResult<thread::JoinHandle<T>>
     where F: FnOnce() -> T, F: Send + 'static, T: Send + 'static

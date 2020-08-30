@@ -41,12 +41,12 @@ mod stream_splitter;
 mod sync;
 mod util;
 
-use core::{EmptyResult, GenericResult};
-use easy_logging::GlobalContext;
-use providers::dropbox::Dropbox;
-use providers::filesystem::Filesystem;
-use providers::google_drive::GoogleDrive;
-use storage::{Storage, BackupGroups};
+use crate::core::{EmptyResult, GenericResult};
+use crate::easy_logging::GlobalContext;
+use crate::providers::dropbox::Dropbox;
+use crate::providers::filesystem::Filesystem;
+use crate::providers::google_drive::GoogleDrive;
+use crate::storage::{Storage, BackupGroups};
 
 fn main() {
     process::exit(match run(){

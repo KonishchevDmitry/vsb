@@ -1,4 +1,4 @@
-use core::GenericResult;
+use crate::core::GenericResult;
 
 use super::{StatusCode, Headers, HeaderName};
 
