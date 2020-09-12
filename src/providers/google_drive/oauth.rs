@@ -1,6 +1,6 @@
-use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
+use std::sync::Mutex;
 use std::time::{Instant, Duration};
 
 use crate::core::GenericResult;
@@ -10,7 +10,7 @@ pub struct GoogleOauth {
     client_id: String,
     client_secret: String,
     refresh_token: String,
-    access_token: RefCell<Option<AccessToken>>,
+    access_token: Mutex<Option<AccessToken>>,
 
     client: HttpClient,
 }
@@ -29,14 +29,14 @@ impl GoogleOauth {
             client_id: client_id.to_owned(),
             client_secret: client_secret.to_owned(),
             refresh_token: refresh_token.to_owned(),
-            access_token: RefCell::new(None),
+            access_token: Mutex::new(None),
 
             client: HttpClient::new(),
         }
     }
 
     pub fn get_access_token(&self, duration: Duration) -> GenericResult<String> {
-        let mut access_token = self.access_token.borrow_mut();
+        let mut access_token = self.access_token.lock().unwrap();
 
         if let Some(ref access_token) = *access_token {
             if access_token.expire_time > Instant::now() + duration {

@@ -5,7 +5,7 @@ use crate::core::{GenericResult, EmptyResult};
 use crate::hash::Hasher;
 use crate::stream_splitter::ChunkStreamReceiver;
 
-pub trait Provider {
+pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
     fn type_(&self) -> ProviderType;
 }

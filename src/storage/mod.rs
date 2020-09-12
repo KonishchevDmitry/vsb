@@ -6,6 +6,7 @@ mod helpers;
 use std::time::SystemTime;
 
 use chrono::{self, TimeZone};
+use rayon::prelude::*;
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::encryptor::Encryptor;
@@ -44,12 +45,14 @@ impl Storage {
     }
 
     pub fn get_backup_groups(&self, verify: bool) -> GenericResult<(Vec<BackupGroup>, bool)> {
-        let (mut groups, mut ok) = BackupGroup::list(self.provider.read(), &self.path)?;
+        let provider = self.provider.read();
+        let (mut groups, mut ok) = BackupGroup::list(provider, &self.path)?;
 
-        if verify {
-            for group in &mut groups {
-                ok &= group.inspect(self.provider.read());
-            }
+        if verify && !groups.is_empty() {
+            info!("Verifying backups on {}...", self.name());
+            ok &= groups.par_iter_mut().map(|group| {
+                group.inspect(provider)
+            }).all(|result| result);
         }
 
         Ok((groups, ok))
