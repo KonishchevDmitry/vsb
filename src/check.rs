@@ -1,21 +1,21 @@
 use std::time::Duration;
 
-use crate::storage::{Storage, BackupGroups};
+use crate::storage::{Storage, BackupGroup};
 
-pub fn check_backups(storage: &Storage, backup_groups: &BackupGroups, consistent: bool,
+pub fn check_backups(storage: &Storage, backup_groups: &[BackupGroup], consistent: bool,
                      max_time_without_backups: Option<Duration>) {
     let mut last_backup = None;
 
-    for (group_name, backups) in backup_groups.iter() {
-        if backups.is_empty() {
-            let error = format!("{} has an empty {:?} backup group.", storage.name(), group_name);
+    for group in backup_groups {
+        if group.backups.is_empty() {
+            let error = format!("{} has an empty {:?} backup group.", storage.name(), group.name);
             if consistent {
                 error!("{}", error);
             } else {
                 warn!("{}", error);
             }
         } else {
-            last_backup = Some(backups.iter().rev().next().unwrap());
+            last_backup = Some(group.backups.iter().rev().next().unwrap());
         }
     }
 
@@ -32,7 +32,7 @@ pub fn check_backups(storage: &Storage, backup_groups: &BackupGroups, consistent
         None => return,
     };
 
-    let last_backup_time = match storage.get_backup_time(&last_backup) {
+    let last_backup_time = match storage.get_backup_time(&last_backup.name) {
         Ok(last_backup_time) => last_backup_time,
         Err(err) => {
             error!("Failed to determine a time when backup has been created: {}.", err);
@@ -46,7 +46,7 @@ pub fn check_backups(storage: &Storage, backup_groups: &BackupGroups, consistent
             error!(concat!(
                 "Failed to check last backup time: ",
                 "the latest backup ({:?}) on {} has backup time in the future."),
-                last_backup, storage.name());
+                last_backup.name, storage.name());
             return;
         }
     };

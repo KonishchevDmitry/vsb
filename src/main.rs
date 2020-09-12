@@ -46,7 +46,7 @@ use crate::easy_logging::GlobalContext;
 use crate::providers::dropbox::Dropbox;
 use crate::providers::filesystem::Filesystem;
 use crate::providers::google_drive::GoogleDrive;
-use crate::storage::{Storage, BackupGroups};
+use crate::storage::{Storage, BackupGroup};
 
 fn main() {
     process::exit(match run(){
@@ -95,7 +95,7 @@ fn acquire_lock(config_path: &str) -> GenericResult<File> {
 
 fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
     let local_storage = Storage::new_read_only(Filesystem::new(), &backup_config.src);
-    let (local_backup_groups, local_ok) = get_backup_groups(&local_storage)?;
+    let (local_backup_groups, local_ok) = get_backup_groups(&local_storage, true)?;
     check::check_backups(&local_storage, &local_backup_groups,
                          local_ok, backup_config.max_time_without_backups);
 
@@ -105,7 +105,7 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
         config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(GoogleDrive::new(&client_id, &client_secret, &refresh_token), &backup_config.dst),
     };
-    let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage)?;
+    let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage, false)?;
 
     info!("Syncing...");
     let sync_ok = sync::sync_backups(
@@ -113,7 +113,7 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
         &mut cloud_storage, &cloud_backup_groups, local_ok && cloud_ok,
         backup_config.max_backup_groups, &backup_config.encryption_passphrase);
 
-    let (cloud_backup_groups, cloud_ok) = match get_backup_groups(&cloud_storage) {
+    let (cloud_backup_groups, cloud_ok) = match get_backup_groups(&cloud_storage, false) {
         Ok(result) => result,
         Err(err) => {
             error!("Unable to check backups on {}: {}.", cloud_storage.name(), err);
@@ -126,22 +126,24 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
     Ok(())
 }
 
-fn get_backup_groups(storage: &Storage) -> GenericResult<(BackupGroups, bool)> {
+fn get_backup_groups(storage: &Storage, verify: bool) -> GenericResult<(Vec<BackupGroup>, bool)> {
     info!("Checking backups on {}...", storage.name());
-    let (backup_groups, ok) = storage.get_backup_groups().map_err(|e| format!(
+    let (groups, ok) = storage.get_backup_groups(verify).map_err(|e| format!(
         "Failed to list backup groups on {}: {}", storage.name(), e))?;
 
     if log_enabled!(log::Level::Debug) {
-        if backup_groups.is_empty() {
+        if groups.is_empty() {
             debug!("There are no backup groups on {}.", storage.name());
         } else {
             debug!("Backup groups on {}:", storage.name());
-            for (group_name, backups) in backup_groups.iter() {
-                let backup_names = backups.iter().cloned().collect::<Vec<String>>().join(", ");
-                debug!("{}: {}", group_name, backup_names);
+            for group in &groups {
+                let backup_names = group.backups.iter()
+                    .map(|backup| backup.name.as_str())
+                    .collect::<Vec<&str>>().join(", ");
+                debug!("{}: {}", group.name, backup_names);
             }
         }
     }
 
-    Ok((backup_groups, ok))
+    Ok((groups, ok))
 }

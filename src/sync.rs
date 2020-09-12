@@ -1,8 +1,10 @@
-use crate::core::EmptyResult;
-use crate::storage::{Storage, BackupGroups, Backups};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
-                    cloud_storage: &mut Storage, cloud_groups: &BackupGroups,
+use crate::core::EmptyResult;
+use crate::storage::{Storage, BackupGroup};
+
+pub fn sync_backups(local_storage: &Storage, local_groups: &[BackupGroup],
+                    cloud_storage: &mut Storage, cloud_groups: &[BackupGroup],
                     mut ok: bool, max_backup_groups: usize, encryption_passphrase: &str) -> bool {
     if cfg!(debug_assertions) {
         error!("Attention! Running in develop mode.");
@@ -15,9 +17,10 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
     }
 
     let target_groups = get_target_backup_groups(local_groups, cloud_groups, max_backup_groups);
-    let no_backups = Backups::new();
+    let cloud_groups = get_group_to_backups_mapping(cloud_groups);
+    let no_backups = BTreeSet::new();
 
-    for (group_name, target_backups) in target_groups.iter() {
+    for (&group_name, target_backups) in target_groups.iter() {
         if target_backups.is_empty() {
             continue;
         }
@@ -38,7 +41,7 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
             },
         };
 
-        for backup_name in target_backups.iter() {
+        for &backup_name in target_backups {
             if cloud_backups.contains(backup_name) {
                 continue;
             }
@@ -47,7 +50,8 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
             info!("Uploading {:?} backup to {}...", backup_path, cloud_storage.name());
 
             if let Err(err) = cloud_storage.upload_backup(
-                &backup_path, group_name, backup_name, encryption_passphrase) {
+                &backup_path, group_name, backup_name, encryption_passphrase
+            ) {
                 error!("Failed to upload {:?} backup to {}: {}.",
                        backup_path, cloud_storage.name(), err);
                 ok = false;
@@ -55,7 +59,7 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
         }
     }
 
-    for (group_name, _) in cloud_groups.iter() {
+    for &group_name in cloud_groups.keys() {
         if target_groups.contains_key(group_name) {
             continue
         }
@@ -76,9 +80,8 @@ pub fn sync_backups(local_storage: &Storage, local_groups: &BackupGroups,
     ok
 }
 
-fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups) -> EmptyResult {
-    let local_groups_num = local_groups.iter().filter(
-        |&(_group_name, backups)| !backups.is_empty()).count();
+fn check_backup_groups(local_groups: &[BackupGroup], cloud_groups: &[BackupGroup]) -> EmptyResult {
+    let local_groups_num = local_groups.iter().filter(|group| !group.backups.is_empty()).count();
     let cloud_groups_num = cloud_groups.len();
 
     if local_groups_num < 2 && cloud_groups_num > local_groups_num {
@@ -89,12 +92,14 @@ fn check_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups)
     Ok(())
 }
 
-fn get_target_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGroups, max_groups: usize) -> BackupGroups {
-    let mut target_groups = local_groups.clone();
+fn get_target_backup_groups<'a>(
+    local_groups: &'a [BackupGroup], cloud_groups: &'a [BackupGroup], max_groups: usize,
+) -> BTreeMap<&'a str, BTreeSet<&'a str>> {
+    let mut target_groups = get_group_to_backups_mapping(local_groups);
 
-    for (group_name, backups) in cloud_groups.iter() {
-        target_groups.entry(group_name.clone()).or_insert_with(Backups::new).extend(
-            backups.iter().cloned());
+    for group in cloud_groups {
+        target_groups.entry(&group.name).or_insert_with(BTreeSet::new).extend(
+            group.backups.iter().map(|backup| backup.name.as_str()));
     }
 
     if target_groups.len() > max_groups {
@@ -109,15 +114,22 @@ fn get_target_backup_groups(local_groups: &BackupGroups, cloud_groups: &BackupGr
             groups_num += 1;
 
             if groups_num >= max_groups {
-                first_group_name = Some(group_name.clone());
+                first_group_name.replace(group_name.to_owned());
                 break
             }
         }
 
         if let Some(first_group_name) = first_group_name {
-            target_groups = target_groups.split_off(&first_group_name)
+            target_groups = target_groups.split_off(first_group_name)
         }
     }
 
     target_groups
+}
+
+fn get_group_to_backups_mapping(groups: &[BackupGroup]) -> BTreeMap<&str, BTreeSet<&str>> {
+    groups.iter().map(|group| {
+        let backups = group.backups.iter().map(|backup| backup.name.as_str()).collect();
+        (group.name.as_str(), backups)
+    }).collect()
 }
