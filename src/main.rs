@@ -34,6 +34,7 @@ mod config;
 mod encryptor;
 mod hash;
 mod http_client;
+mod metrics;
 mod provider;
 mod providers;
 mod storage;
@@ -69,6 +70,13 @@ fn run() -> GenericResult<i32> {
 
         if let Err(err) = sync_backups(backup) {
             error!("Sync failed: {}.", err);
+            exit_code = 1;
+        }
+    }
+
+    if let Some(path) = config.prometheus_metrics.as_ref() {
+        if let Err(err) = metrics::save(path) {
+            error!("Failed to save Prometheus metrics to {:?}: {}.", path, err);
             exit_code = 1;
         }
     }

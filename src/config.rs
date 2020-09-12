@@ -17,6 +17,7 @@ pub struct Config {
     #[serde(skip)]
     pub path: String,
     pub backups: Vec<Backup>,
+    pub prometheus_metrics: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -104,7 +105,7 @@ fn load_config(path: &str) -> GenericResult<Config> {
 
     for backup in config.backups.iter_mut() {
         backup.name = validate_name(&backup.name)?;
-        backup.src = validate_path(&shellexpand::tilde(&backup.src))?;
+        backup.src = validate_local_path(&backup.src)?;
         backup.dst = validate_path(&backup.dst)?;
 
         if backup.max_backup_groups == 0 {
@@ -114,6 +115,10 @@ fn load_config(path: &str) -> GenericResult<Config> {
         if backup.encryption_passphrase.is_empty() {
             return Err!("Encryption passphrase mustn't be empty");
         }
+    }
+
+    if let Some(metrics_path) = config.prometheus_metrics.clone() {
+        config.prometheus_metrics.replace(validate_local_path(&metrics_path)?);
     }
 
     Ok(config)
@@ -132,7 +137,7 @@ fn validate_path(path: &str) -> GenericResult<String> {
     let mut path_components = Path::new(path).components();
 
     if path_components.next() != Some(Component::RootDir) {
-        return Err!("Backup paths must be absolute");
+        return Err!("Paths must be absolute");
     }
     normalized_path.push(Component::RootDir.as_os_str());
 
@@ -145,6 +150,10 @@ fn validate_path(path: &str) -> GenericResult<String> {
     }
 
     Ok(normalized_path.to_str().unwrap().to_owned())
+}
+
+fn validate_local_path(path: &str) -> GenericResult<String> {
+    validate_path(&shellexpand::tilde(path))
 }
 
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
