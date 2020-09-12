@@ -11,7 +11,7 @@ pub struct Backup {
     pub path: String,
     pub name: String,
     metadata_path: Option<String>,
-    stat: Option<BackupStat>,
+    pub stat: Option<BackupStat>,
 }
 
 pub struct BackupStat {

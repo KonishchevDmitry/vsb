@@ -10,6 +10,7 @@ extern crate libc;
 extern crate md5;
 extern crate mime;
 extern crate nix;
+#[macro_use] extern crate prometheus;
 extern crate regex;
 extern crate reqwest;
 extern crate serde;
@@ -106,6 +107,10 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
     let (local_backup_groups, local_ok) = get_backup_groups(&local_storage, true)?;
     check::check_backups(&local_storage, &local_backup_groups,
                          local_ok, backup_config.max_time_without_backups);
+
+    if let Err(err) = metrics::collect(&backup_config.name, &local_backup_groups) {
+        error!("Failed to collect metrics: {}.", err);
+    }
 
     let mut cloud_storage = match backup_config.provider {
         config::Provider::Dropbox {ref access_token} =>
