@@ -7,15 +7,19 @@ use crate::core::{EmptyResult, GenericError};
 use crate::storage::BackupGroup;
 
 lazy_static! {
-    static ref EXTERN_FILES: GaugeVec = register(
-        "extern_files", "Number of extern files in the last backup.");
-    static ref UNIQUE_FILES: GaugeVec = register(
-        "unique_files", "Number of unique files in the last backup.");
-    static ref ERROR_FILES: GaugeVec = register(
-        "error_files", "Number of missing files in the last backup.");
+    static ref FILES: GaugeVec = register("files", "Number of files in the last backup.");
+
+    static ref SIZE: GaugeVec = register("size", "Last backup size.");
+    static ref TOTAL_SIZE: GaugeVec = register("total_size", "Total size of all backups.");
 }
 
 pub fn collect(name: &str, groups: &[BackupGroup]) -> EmptyResult {
+    collect_last_backup(name, groups)?;
+    collect_total(name, groups)?;
+    Ok(())
+}
+
+fn collect_last_backup(name: &str, groups: &[BackupGroup]) -> EmptyResult {
     let mut last_backup = None;
 
     for group in groups.iter().rev() {
@@ -25,19 +29,54 @@ pub fn collect(name: &str, groups: &[BackupGroup]) -> EmptyResult {
         }
     }
 
-    let stat = match last_backup {
+    let (inner_stat, outer_stat) = match last_backup {
         Some(backup) => {
-            match backup.stat.as_ref() {
-                Some(stat) => stat,
-                None => return Err!("The backup has no collected statistics"),
+            match (backup.inner_stat.as_ref(), backup.outer_stat.as_ref()) {
+                (Some(inner), Some(outer)) => (inner, outer),
+                _ => return Err!("The backup has no collected statistics"),
             }
         }
         None => return Ok(()),
     };
 
-    EXTERN_FILES.with_label_values(&[name]).set(stat.extern_files as f64);
-    UNIQUE_FILES.with_label_values(&[name]).set(stat.unique_files as f64);
-    ERROR_FILES.with_label_values(&[name]).set(stat.error_files as f64);
+    for &(type_, count) in &[
+        ("extern", inner_stat.extern_files),
+        ("unique", inner_stat.unique_files),
+        ("error", inner_stat.error_files),
+    ] {
+        FILES.with_label_values(&[name, type_]).set(count as f64);
+    }
+
+    for &(type_, size) in &[
+        ("metadata", outer_stat.metadata_size),
+        ("data", outer_stat.data_size),
+    ] {
+        SIZE.with_label_values(&[name, type_]).set(size as f64);
+    }
+
+    Ok(())
+}
+
+fn collect_total(name: &str, groups: &[BackupGroup]) -> EmptyResult {
+    let mut metadata_size = 0;
+    let mut data_size = 0;
+
+    for group in groups {
+        for backup in &group.backups {
+            let stat = backup.outer_stat.as_ref().ok_or_else(||
+                "The backup has no collected statistics")?;
+
+            metadata_size += stat.metadata_size;
+            data_size += stat.data_size;
+        }
+    }
+
+    for &(type_, size) in &[
+        ("metadata", metadata_size),
+        ("data", data_size),
+    ] {
+        TOTAL_SIZE.with_label_values(&[name, type_]).set(size as f64);
+    }
 
     Ok(())
 }
@@ -63,5 +102,5 @@ pub fn save(path: &str) -> EmptyResult {
 }
 
 fn register(name: &str, help: &str) -> GaugeVec {
-    register_gauge_vec!(&format!("backup_{}", name), help, &["name"]).unwrap()
+    register_gauge_vec!(&format!("backup_{}", name), help, &["name", "type"]).unwrap()
 }

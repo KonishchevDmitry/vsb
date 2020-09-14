@@ -1,23 +1,29 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 
 use bzip2::read::BzDecoder;
 
 use crate::core::GenericResult;
-use crate::provider::ReadProvider;
+use crate::provider::{ReadProvider, FileType};
 
 
 pub struct Backup {
     pub path: String,
     pub name: String,
     metadata_path: Option<String>,
-    pub stat: Option<BackupStat>,
+    pub inner_stat: Option<BackupInnerStat>,
+    pub outer_stat: Option<BackupOuterStat>,
 }
 
-pub struct BackupStat {
+pub struct BackupInnerStat {
     pub extern_files: usize,
     pub unique_files: usize,
     pub error_files: usize,
+}
+
+pub struct BackupOuterStat {
+    pub metadata_size: u64,
+    pub data_size: u64,
 }
 
 impl Backup {
@@ -26,28 +32,45 @@ impl Backup {
             path: path.to_owned(),
             name: name.to_owned(),
             metadata_path: None,
-            stat: None
+            inner_stat: None,
+            outer_stat: None,
         };
 
         if archive {
             return Ok(backup)
         }
 
-        let backup_files: HashSet<String> = provider.list_directory(path)?
-            .ok_or_else(|| "The backup doesn't exist".to_owned())?
-            .drain(..).map(|file| file.name).collect();
+        let backup_files: HashMap<String, Option<u64>> = provider.list_directory(path)?
+            .ok_or_else(|| "The backup doesn't exist")?
+            .drain(..)
+            .filter(|file| file.type_ == FileType::File)
+            .map(|file| (file.name, file.size))
+            .collect();
 
         let metadata_name = "metadata.bz2";
-        if !backup_files.contains(metadata_name) {
-            return Err!("The backup is corrupted: metadata file is missing")
+        let metadata_size = if let Some(size) = backup_files.get(metadata_name).copied() {
+            backup.metadata_path.replace(format!("{}/{}", path, metadata_name));
+            size
+        } else {
+            return Err!("The backup is corrupted: metadata file is missing");
+        };
+
+        let mut has_data = false;
+        let mut data_size = None;
+
+        for &data_name in &["data.tar.gz", "data.tar.bz2", "data.tar.7z"] {
+            if let Some(size) = backup_files.get(data_name).copied() {
+                data_size = size;
+                has_data = true;
+                break;
+            }
         }
-        backup.metadata_path.replace(format!("{}/{}", path, metadata_name));
-
-        let data_files: HashSet<String> = ["data.tar.gz", "data.tar.bz2", "data.tar.7z"]
-            .iter().map(|&s| s.to_owned()).collect();
-
-        if backup_files.is_disjoint(&data_files) {
+        if !has_data {
             return Err!("The backup is corrupted: backup data file is missing")
+        }
+
+        if let (Some(metadata_size), Some(data_size)) = (metadata_size, data_size) {
+            backup.outer_stat.replace(BackupOuterStat {metadata_size, data_size});
         }
 
         Ok(backup)
@@ -68,7 +91,7 @@ impl Backup {
             .map(BzDecoder::new).map(BufReader::new)
             .map_err(|e| format!("Unable to open metadata file: {}", e))?;
 
-        let mut stat = BackupStat {
+        let mut stat = BackupInnerStat {
             extern_files: 0,
             unique_files: 0,
             error_files:  0,
@@ -112,7 +135,7 @@ impl Backup {
         }
 
         let recoverable = stat.error_files == 0;
-        self.stat.replace(stat);
+        self.inner_stat.replace(stat);
 
         Ok(has_files && recoverable)
     }
