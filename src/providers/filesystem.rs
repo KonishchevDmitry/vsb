@@ -38,22 +38,26 @@ impl ReadProvider for Filesystem {
         for entry in entries? {
             let entry = entry?;
 
-            let file_name = entry.file_name().into_string().map_err(|file_name| format!(
+            let name = entry.file_name().into_string().map_err(|file_name| format!(
                 "Got an invalid file name: {:?}", file_name.to_string_lossy()))?;
 
             let metadata = entry.metadata().map_err(|e| format!(
                 "Unable to get metadata of {:?}: {}", entry.path().to_string_lossy(), e))?;
 
-            files.push(File {
-                name: file_name,
-                type_: if metadata.is_file() {
-                    FileType::File
-                } else if metadata.is_dir() {
-                    FileType::Directory
-                } else {
-                    FileType::Other
-                },
-            })
+            let type_ = if metadata.is_file() {
+                FileType::File
+            } else if metadata.is_dir() {
+                FileType::Directory
+            } else {
+                FileType::Other
+            };
+
+            let size = match type_ {
+                FileType::File => Some(metadata.len()),
+                FileType::Directory | FileType::Other => None,
+            };
+
+            files.push(File {name, type_, size})
         }
 
         Ok(Some(files))

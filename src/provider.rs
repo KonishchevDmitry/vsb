@@ -37,6 +37,7 @@ pub enum ProviderType {
 pub struct File {
     pub name: String,
     pub type_: FileType,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, PartialEq)]

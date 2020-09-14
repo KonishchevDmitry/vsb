@@ -301,6 +301,7 @@ impl ReadProvider for GoogleDrive {
             files.extend(children.drain(..).map(|file| File {
                 type_: file.type_(),
                 name: file.name,
+                size: None,
             }));
         }
 

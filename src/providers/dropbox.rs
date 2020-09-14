@@ -146,6 +146,7 @@ impl ReadProvider for Dropbox {
                         "file" => FileType::File,
                         _ => FileType::Other,
                     },
+                    size: None,
                 });
             }
 
