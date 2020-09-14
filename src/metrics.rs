@@ -8,6 +8,7 @@ use crate::storage::BackupGroup;
 
 lazy_static! {
     static ref FILES: GaugeVec = register("files", "Number of files in the last backup.");
+    static ref FILES_SIZE: GaugeVec = register("files_size", "Files size in the last backup.");
 
     static ref SIZE: GaugeVec = register("size", "Last backup size.");
     static ref TOTAL_SIZE: GaugeVec = register("total_size", "Total size of all backups.");
@@ -42,9 +43,15 @@ fn collect_last_backup(name: &str, groups: &[BackupGroup]) -> EmptyResult {
     for &(type_, count) in &[
         ("extern", inner_stat.extern_files),
         ("unique", inner_stat.unique_files),
-        ("error", inner_stat.error_files),
     ] {
         FILES.with_label_values(&[name, type_]).set(count as f64);
+    }
+
+    for &(type_, size) in &[
+        ("extern", inner_stat.extern_size),
+        ("unique", inner_stat.unique_size),
+    ] {
+        FILES_SIZE.with_label_values(&[name, type_]).set(size as f64);
     }
 
     for &(type_, size) in &[

@@ -18,7 +18,8 @@ pub struct Backup {
 pub struct BackupInnerStat {
     pub extern_files: usize,
     pub unique_files: usize,
-    pub error_files: usize,
+    pub extern_size: u64,
+    pub unique_size: u64,
 }
 
 pub struct BackupOuterStat {
@@ -91,10 +92,12 @@ impl Backup {
             .map(BzDecoder::new).map(BufReader::new)
             .map_err(|e| format!("Unable to open metadata file: {}", e))?;
 
+        let mut recoverable = true;
         let mut stat = BackupInnerStat {
             extern_files: 0,
             unique_files: 0,
-            error_files:  0,
+            extern_size: 0,
+            unique_size: 0,
         };
 
         for line in metadata_file.lines() {
@@ -106,25 +109,32 @@ impl Backup {
             let fingerprint = parts.next();
             let filename = parts.next();
 
-            let (checksum, unique, filename) = match (checksum, status, fingerprint, filename) {
-                (Some(checksum), Some(status), Some(_), Some(filename))
-                if status == "extern" || status == "unique" => (checksum, status == "unique", filename),
+            let (checksum, unique, fingerprint, filename) = match (checksum, status, fingerprint, filename) {
+                (Some(checksum), Some(status), Some(fingerprint), Some(filename))
+                if status == "extern" || status == "unique" => (
+                    checksum, status == "unique", fingerprint, filename,
+                ),
                 _ => return Err!("Error while reading metadata file: it has an unsupported format"),
             };
 
+            let size = fingerprint.rsplit(':').next().unwrap();
+            let size: u64 = size.parse().map_err(|_| format!(
+                "Error while reading metadata file: Invalid file size: {:?}", size))?;
+
             if unique {
                 stat.unique_files += 1;
+                stat.unique_size += size;
                 available_checksums.insert(checksum.to_owned());
             } else {
                 stat.extern_files += 1;
+                stat.extern_size += size;
 
                 if !available_checksums.contains(checksum) {
-                    stat.error_files += 1;
-
                     error!(concat!(
                         "{:?} backup on {} is not recoverable: ",
                         "unable to find extern {:?} file in the backup group."
                     ), self.name, provider.name(), filename);
+                    recoverable = false;
                 }
             }
         }
@@ -133,8 +143,6 @@ impl Backup {
         if !has_files {
             error!("{:?} backup on {} don't have any files.", self.name, provider.name());
         }
-
-        let recoverable = stat.error_files == 0;
         self.inner_stat.replace(stat);
 
         Ok(has_files && recoverable)
