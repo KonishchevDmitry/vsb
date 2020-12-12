@@ -42,7 +42,7 @@ impl Backup {
         }
 
         let backup_files: HashMap<String, Option<u64>> = provider.list_directory(path)?
-            .ok_or_else(|| "The backup doesn't exist")?
+            .ok_or("The backup doesn't exist")?
             .drain(..)
             .filter(|file| file.type_ == FileType::File)
             .map(|file| (file.name, file.size))
@@ -80,7 +80,7 @@ impl Backup {
     pub fn inspect(
         &mut self, provider: &dyn ReadProvider, available_checksums: &mut HashSet<String>,
     ) -> GenericResult<bool> {
-        let metadata_path = self.metadata_path.as_ref().ok_or_else(||
+        let metadata_path = self.metadata_path.as_ref().ok_or(
             "The backup has no metadata file")?;
 
         if cfg!(debug_assertions) {

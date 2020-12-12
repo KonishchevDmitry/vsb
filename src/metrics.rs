@@ -70,9 +70,8 @@ fn collect_total(name: &str, groups: &[BackupGroup]) -> EmptyResult {
 
     for group in groups {
         for backup in &group.backups {
-            let stat = backup.outer_stat.as_ref().ok_or_else(||
+            let stat = backup.outer_stat.as_ref().ok_or(
                 "The backup has no collected statistics")?;
-
             metadata_size += stat.metadata_size;
             data_size += stat.data_size;
         }
