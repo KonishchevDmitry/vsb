@@ -1,5 +1,3 @@
-mod oauth;
-
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -12,10 +10,11 @@ use crate::core::{EmptyResult, GenericResult};
 use crate::hash::{Hasher, Md5};
 use crate::http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest,
                          RawResponseReader, JsonErrorReader, HttpClientError, headers};
+use crate::oauth::OauthClient;
 use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-use self::oauth::GoogleOauth;
+const OAUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2";
 
 const API_ENDPOINT: &str = "https://www.googleapis.com/drive/v3";
 const API_REQUEST_TIMEOUT: u64 = 15;
@@ -24,15 +23,15 @@ const UPLOAD_ENDPOINT: &str = "https://www.googleapis.com/upload/drive/v3";
 const UPLOAD_REQUEST_TIMEOUT: u64 = 60 * 60;
 
 pub struct GoogleDrive {
+    oauth: OauthClient,
     client: HttpClient,
-    oauth: GoogleOauth,
 }
 
 impl GoogleDrive {
     pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GoogleDrive {
         GoogleDrive {
+            oauth: OauthClient::new(OAUTH_ENDPOINT, client_id, client_secret, refresh_token),
             client: HttpClient::new(),
-            oauth: GoogleOauth::new(client_id, client_secret, refresh_token),
         }
     }
 
@@ -231,12 +230,7 @@ impl GoogleDrive {
     }
 
     fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> Result<HttpRequest<'a, R, E>, GoogleDriveError> {
-        let access_token = self.oauth.get_access_token(Duration::from_secs(API_REQUEST_TIMEOUT))
-            .map_err(|e| GoogleDriveError::Oauth(format!(
-                "Unable obtain a Google OAuth token: {}", e)))?;
-
-        Ok(request.with_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
-            .map_err(|_| GoogleDriveError::Oauth(s!("Got an invalid Google OAuth token")))?)
+        Ok(self.oauth.authenticate(request).map_err(|e| GoogleDriveError::Oauth(e.to_string()))?)
     }
 
     fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>

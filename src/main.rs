@@ -36,6 +36,7 @@ mod encryptor;
 mod hash;
 mod http_client;
 mod metrics;
+mod oauth;
 mod provider;
 mod providers;
 mod storage;
@@ -113,8 +114,8 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
     }
 
     let mut cloud_storage = match backup_config.provider {
-        config::Provider::Dropbox {ref access_token} =>
-            Storage::new(Dropbox::new(&access_token)?, &backup_config.dst),
+        config::Provider::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
+            Storage::new(Dropbox::new(&client_id, &client_secret, &refresh_token)?, &backup_config.dst),
         config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(GoogleDrive::new(&client_id, &client_secret, &refresh_token), &backup_config.dst),
     };

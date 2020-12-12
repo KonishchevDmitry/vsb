@@ -39,7 +39,25 @@ pub struct Backup {
 pub enum Provider {
     #[serde(rename = "dropbox")]
     Dropbox {
-        access_token: String
+        /*
+        How to obtain the credentials:
+
+        open https://www.dropbox.com/developers/apps
+        client_id=...     # App key
+        client_secret=... # App secret
+
+        open "https://www.dropbox.com/oauth2/authorize?client_id=$client_id&response_type=code&token_access_type=offline"
+        code=...
+
+        curl "https://api.dropbox.com/oauth2/token" -d grant_type=authorization_code -d "code=$code" -d "client_id=$client_id" -d "client_secret=$client_secret"
+        refresh_token=...
+
+        # Test access token acquiring
+        curl "https://api.dropbox.com/oauth2/token" -d grant_type=refresh_token -d "refresh_token=$refresh_token" -d "client_id=$client_id" -d "client_secret=$client_secret"
+         */
+        client_id: String,
+        client_secret: String,
+        refresh_token: String,
     },
 
     #[serde(rename = "google_drive")]

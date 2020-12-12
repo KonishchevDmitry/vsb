@@ -4,14 +4,15 @@ use std::sync::Mutex;
 use std::time::{Instant, Duration};
 
 use crate::core::GenericResult;
-use crate::http_client::{HttpClient, HttpRequest, Method};
+use crate::http_client::{HttpClient, HttpRequest, Method, headers};
 
-pub struct GoogleOauth {
+pub struct OauthClient {
     client_id: String,
     client_secret: String,
     refresh_token: String,
     access_token: Mutex<Option<AccessToken>>,
 
+    url: String,
     client: HttpClient,
 }
 
@@ -20,31 +21,40 @@ struct AccessToken {
     expire_time: Instant,
 }
 
-const API_ENDPOINT: &str = "https://accounts.google.com/o/oauth2";
 const API_REQUEST_TIMEOUT: u64 = 5;
+const ACCESS_TOKEN_MIN_EXPIRE_TIME: u64 = 60;
 
-impl GoogleOauth {
-    pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GoogleOauth {
-        GoogleOauth {
+impl OauthClient {
+    pub fn new(url: &str, client_id: &str, client_secret: &str, refresh_token: &str) -> OauthClient {
+        OauthClient {
             client_id: client_id.to_owned(),
             client_secret: client_secret.to_owned(),
             refresh_token: refresh_token.to_owned(),
             access_token: Mutex::new(None),
 
+            url: url.to_owned(),
             client: HttpClient::new(),
         }
     }
 
-    pub fn get_access_token(&self, duration: Duration) -> GenericResult<String> {
+    pub fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> GenericResult<HttpRequest<'a, R, E>> {
+        let access_token = self.get_access_token().map_err(|e| format!(
+            "Unable obtain OAuth token: {}", e))?;
+
+        Ok(request.with_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
+            .map_err(|_| "Got an invalid OAuth token")?)
+    }
+
+    fn get_access_token(&self) -> GenericResult<String> {
         let mut access_token = self.access_token.lock().unwrap();
 
         if let Some(ref access_token) = *access_token {
-            if access_token.expire_time > Instant::now() + duration {
+            if Instant::now() + Duration::from_secs(ACCESS_TOKEN_MIN_EXPIRE_TIME) <= access_token.expire_time {
                 return Ok(access_token.token.to_owned());
             }
         }
 
-        debug!("Obtaining a new Google Drive access token...");
+        debug!("Obtaining a new OAuth access token...");
 
         #[derive(Serialize)]
         struct Request<'a> {
@@ -60,8 +70,8 @@ impl GoogleOauth {
             expires_in: u64,
         }
 
-        let request = HttpRequest::<Response, GoogleOauthApiError>::new_json(
-            Method::POST, API_ENDPOINT.to_owned() + "/token",
+        let request = HttpRequest::<Response, OauthApiError>::new_json(
+            Method::POST, format!("{}/token", self.url),
             Duration::from_secs(API_REQUEST_TIMEOUT)
         ).with_form(&Request {
             client_id: &self.client_id,
@@ -83,15 +93,15 @@ impl GoogleOauth {
 }
 
 #[derive(Debug, Deserialize)]
-struct GoogleOauthApiError {
+struct OauthApiError {
     error_description: String,
 }
 
-impl Error for GoogleOauthApiError {
+impl Error for OauthApiError {
 }
 
-impl fmt::Display for GoogleOauthApiError {
+impl fmt::Display for OauthApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Google OAuth error: {}", self.error_description)
+        write!(f, "OAuth error: {}", self.error_description)
     }
 }

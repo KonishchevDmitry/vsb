@@ -104,6 +104,7 @@ impl<'a, R, E> HttpRequest<'a, R, E> {
 impl<'a, R: de::DeserializeOwned + 'a, E: de::DeserializeOwned + 'a> HttpRequest<'a, R, E> {
     pub fn new_json(method: Method, url: String, timeout: Duration) -> HttpRequest<'a, R, E> {
         HttpRequest::new(method, url, timeout, JsonReplyReader::new(), JsonErrorReader::new())
+            .with_header("Accept", "application/json").unwrap()
     }
 }
 

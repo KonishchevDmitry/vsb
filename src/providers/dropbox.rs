@@ -9,10 +9,12 @@ use crate::core::{EmptyResult, GenericResult};
 use crate::hash::{Hasher, ChunkedSha256};
 use crate::http_client::{
     HttpClient, HttpRequest, HttpRequestBuildingError, Method, Body, EmptyResponse, HttpClientError,
-    headers,
 };
+use crate::oauth::OauthClient;
 use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
+
+const OAUTH_ENDPOINT: &str = "https://www.dropbox.com/oauth2";
 
 const API_ENDPOINT: &str = "https://api.dropboxapi.com/2";
 const API_REQUEST_TIMEOUT: u64 = 15;
@@ -21,15 +23,15 @@ const CONTENT_ENDPOINT: &str = "https://content.dropboxapi.com/2";
 const CONTENT_REQUEST_TIMEOUT: u64 = 60 * 60;
 
 pub struct Dropbox {
+    oauth: OauthClient,
     client: HttpClient,
 }
 
 impl Dropbox {
-    pub fn new(access_token: &str) -> GenericResult<Dropbox> {
+    pub fn new(client_id: &str, client_secret: &str, refresh_token: &str) -> GenericResult<Dropbox> {
         Ok(Dropbox {
-            client: HttpClient::new()
-                .with_default_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
-                .map_err(|_| "Invalid access token")?
+            oauth: OauthClient::new(OAUTH_ENDPOINT, client_id, client_secret, refresh_token),
+            client: HttpClient::new(),
         })
     }
 
@@ -52,7 +54,7 @@ impl Dropbox {
         where I: ser::Serialize,
               O: de::DeserializeOwned,
     {
-        self.client.send(HttpRequest::new_json(
+        self.send_request(HttpRequest::new_json(
             Method::POST, API_ENDPOINT.to_owned() + path,
             Duration::from_secs(API_REQUEST_TIMEOUT)
         ).with_json(request)?)
@@ -71,7 +73,13 @@ impl Dropbox {
             .with_header("Dropbox-API-Arg", request_json)?
             .with_body("application/octet-stream", body)?;
 
-        self.client.send(http_request)
+        self.send_request(http_request)
+    }
+
+    fn send_request<O>(&self, request: HttpRequest<O, ApiError>) -> Result<O, HttpClientError<ApiError>> {
+        let request = self.oauth.authenticate(request).map_err(|e|
+            HttpClientError::Generic(e.to_string()))?;
+        self.client.send(request)
     }
 }
 
