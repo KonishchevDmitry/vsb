@@ -2,6 +2,7 @@ use std::thread;
 use std::time::{self, Duration};
 
 use libc::pid_t;
+use log::{debug, error};
 use nix::errno::Errno;
 use nix::{sys, unistd};
 

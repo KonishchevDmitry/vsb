@@ -5,6 +5,7 @@ mod helpers;
 
 use std::time::SystemTime;
 
+use log::info;
 use chrono::{self, TimeZone};
 use rayon::prelude::*;
 

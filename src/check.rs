@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use log::{warn, error};
+
 use crate::storage::{Storage, BackupGroup};
 
 pub fn check_backups(storage: &Storage, backup_groups: &[BackupGroup], consistent: bool,

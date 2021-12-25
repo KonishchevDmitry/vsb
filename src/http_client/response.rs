@@ -1,3 +1,5 @@
+use serde_derive::Deserialize;
+
 use crate::core::GenericResult;
 
 use super::{StatusCode, Headers, HeaderName};

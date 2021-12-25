@@ -8,6 +8,7 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
+use log::{log_enabled, trace};
 use reqwest::blocking::Client;
 
 use crate::core::GenericResult;

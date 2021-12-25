@@ -3,6 +3,9 @@ use std::fmt;
 use std::sync::Mutex;
 use std::time::{Instant, Duration};
 
+use log::debug;
+use serde_derive::{Serialize, Deserialize};
+
 use crate::core::GenericResult;
 use crate::http_client::{HttpClient, HttpRequest, Method, headers};
 

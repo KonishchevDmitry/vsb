@@ -1,13 +1,13 @@
 use std::fmt;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf, Component};
-use std::process;
 use std::time::Duration;
 
-use clap::{App, Arg, AppSettings};
+use lazy_static::lazy_static;
 use regex::Regex;
 use serde::de::{self, Deserializer, Visitor};
+use serde_derive::Deserialize;
 
 use crate::core::GenericResult;
 
@@ -68,78 +68,34 @@ pub enum Provider {
     },
 }
 
-pub fn load() -> Config {
-    let default_config_path = "~/.pyvsb_to_cloud.yaml";
+impl Config {
+    pub fn load(path: &str) -> GenericResult<Config> {
+        let mut data = Vec::new();
+        File::open(path)?.read_to_end(&mut data)?;
 
-    let matches = App::new("PyVSB to cloud")
-        .about("\nUploads PyVSB backups to cloud")
-        .arg(Arg::with_name("config")
-            .short("c")
-            .long("config")
-            .value_name("PATH")
-            .help(&format!("Configuration file path [default: {}]", default_config_path))
-            .takes_value(true))
-        .arg(Arg::with_name("verbose")
-            .short("v")
-            .long("verbose")
-            .multiple(true)
-            .help("Sets the level of verbosity"))
-        .setting(AppSettings::DisableVersion)
-        .get_matches();
+        let mut config: Config = serde_yaml::from_slice(&data)?;
+        config.path = path.to_owned();
 
-    let log_level = match matches.occurrences_of("verbose") {
-        0 => log::Level::Info,
-        1 => log::Level::Debug,
-        2 => log::Level::Trace,
-        _ => {
-            let _ = writeln!(io::stderr(), "Invalid verbosity level.");
-            process::exit(1);
-        }
-    };
+        for backup in config.backups.iter_mut() {
+            backup.name = validate_name(&backup.name)?;
+            backup.src = validate_local_path(&backup.src)?;
+            backup.dst = validate_path(&backup.dst)?;
 
-    if let Err(err) = easy_logging::init(module_path!().split("::").next().unwrap(), log_level) {
-        let _ = writeln!(io::stderr(), "Failed to initialize the logging: {}.", err);
-        process::exit(1);
-    }
+            if backup.max_backup_groups == 0 {
+                return Err!("Maximum backup groups number must be positive");
+            }
 
-    let config_path = matches.value_of("config").map(ToString::to_string).unwrap_or_else(||
-        shellexpand::tilde(default_config_path).to_string());
-
-    match load_config(&config_path) {
-        Ok(config) => config,
-        Err(err) => {
-            error!("Error while reading {:?} configuration file: {}.", config_path, err);
-            process::exit(1);
-        }
-    }
-}
-
-fn load_config(path: &str) -> GenericResult<Config> {
-    let mut data = Vec::new();
-    File::open(path)?.read_to_end(&mut data)?;
-
-    let mut config: Config = serde_yaml::from_slice(&data)?;
-    config.path = path.to_owned();
-
-    for backup in config.backups.iter_mut() {
-        backup.name = validate_name(&backup.name)?;
-        backup.src = validate_local_path(&backup.src)?;
-        backup.dst = validate_path(&backup.dst)?;
-
-        if backup.max_backup_groups == 0 {
-            return Err!("Maximum backup groups number must be positive");
+            if backup.encryption_passphrase.is_empty() {
+                return Err!("Encryption passphrase mustn't be empty");
+            }
         }
 
-        if backup.encryption_passphrase.is_empty() {
-            return Err!("Encryption passphrase mustn't be empty");
+        if let Some(metrics_path) = config.prometheus_metrics.clone() {
+            config.prometheus_metrics.replace(validate_local_path(&metrics_path)?);
         }
-    }
 
-    if let Some(metrics_path) = config.prometheus_metrics.clone() {
-        config.prometheus_metrics.replace(validate_local_path(&metrics_path)?);
+        Ok(config)
     }
-
-    Ok(config)
 }
 
 fn validate_name(mut name: &str) -> GenericResult<String> {

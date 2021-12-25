@@ -3,7 +3,10 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
+use log::log_enabled;
+
 use serde::{ser, de};
+use serde_derive::Serialize;
 
 use super::{Method, Headers, HeaderName, Body, ResponseReader, JsonReplyReader, JsonErrorReader,
             headers};

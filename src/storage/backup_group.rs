@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use log::error;
 use regex::{self, Regex};
 
 use crate::core::GenericResult;

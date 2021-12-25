@@ -1,7 +1,8 @@
 use std::io::{BufWriter, Write};
 use std::fs::{self, File};
 
-use prometheus::{self, TextEncoder, Encoder, GaugeVec};
+use lazy_static::lazy_static;
+use prometheus::{self, TextEncoder, Encoder, GaugeVec, register_gauge_vec};
 
 use crate::core::{EmptyResult, GenericError};
 use crate::storage::BackupGroup;

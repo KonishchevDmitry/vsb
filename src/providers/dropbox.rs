@@ -3,7 +3,9 @@ use std::fmt;
 use std::ops::Add;
 use std::time::Duration;
 
+use log::error;
 use serde::{ser, de};
+use serde_derive::{Serialize, Deserialize};
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::hash::{Hasher, ChunkedSha256};

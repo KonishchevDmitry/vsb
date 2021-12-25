@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 
 use bzip2::read::BzDecoder;
+use log::{warn, error};
 
 use crate::core::GenericResult;
 use crate::provider::{ReadProvider, FileType};
