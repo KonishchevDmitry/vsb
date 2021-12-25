@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -8,22 +9,36 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::de::{self, Deserializer, Visitor};
 use serde_derive::Deserialize;
+use validator::Validate;
 
 use crate::core::GenericResult;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
     pub path: String,
-    pub backups: Vec<Backup>,
+    #[validate]
+    pub backups: Vec<BackupConfig>,
+
+    // FIXME(konishchev): Rewrite
     pub prometheus_metrics: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct Backup {
+pub struct BackupConfig {
+    #[validate(length(min = 1))]
     pub name: String,
+
+    // FIXME(konishchev): Rewrite
+    #[validate]
+    pub upload: Option<UploadConfig>,
+}
+
+#[derive(Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct UploadConfig {
     pub src: String,
     pub dst: String,
     pub provider: Provider,
@@ -75,18 +90,26 @@ impl Config {
 
         let mut config: Config = serde_yaml::from_slice(&data)?;
         config.path = path.to_owned();
+        config.validate()?;
+
+        let mut backup_names = HashSet::new();
 
         for backup in config.backups.iter_mut() {
-            backup.name = validate_name(&backup.name)?;
-            backup.src = validate_local_path(&backup.src)?;
-            backup.dst = validate_path(&backup.dst)?;
-
-            if backup.max_backup_groups == 0 {
-                return Err!("Maximum backup groups number must be positive");
+            if !backup_names.insert(&backup.name) {
+                return Err!("Duplicated backup name: {:?}", backup.name);
             }
 
-            if backup.encryption_passphrase.is_empty() {
-                return Err!("Encryption passphrase mustn't be empty");
+            if let Some(upload) = backup.upload.as_mut() {
+                upload.src = validate_local_path(&upload.src)?;
+                upload.dst = validate_path(&upload.dst)?;
+
+                if upload.max_backup_groups == 0 {
+                    return Err!("Maximum backup groups number must be positive");
+                }
+
+                if upload.encryption_passphrase.is_empty() {
+                    return Err!("Encryption passphrase mustn't be empty");
+                }
             }
         }
 
@@ -96,14 +119,16 @@ impl Config {
 
         Ok(config)
     }
-}
 
-fn validate_name(mut name: &str) -> GenericResult<String> {
-    name = name.trim();
-    if name.is_empty() {
-        return Err!("Backup name mustn't be empty");
+    pub fn get_backup(&self, name: &str) -> GenericResult<&BackupConfig> {
+        for backup in &self.backups {
+            if backup.name == name {
+                return Ok(backup);
+            }
+        }
+
+        Err!("{:?} backup is not specified in the configuration file", name)
     }
-    Ok(name.to_owned())
 }
 
 fn validate_path(path: &str) -> GenericResult<String> {

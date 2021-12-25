@@ -52,10 +52,13 @@ fn main() {
 fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
     let config_path = &global.config_path;
     let config = Config::load(config_path).map_err(|e| format!(
-        "Error while reading {:?} configuration file: {}.", config_path, e))?;
+        "Error while reading {:?} configuration file: {}", config_path, e))?;
 
     Ok(match parser.parse()? {
-        Action::Backup {..} => false,
+        Action::Backup {name} => {
+            config.get_backup(&name)?;
+            true
+        },
         Action::Upload => uploader::upload(&config)?,
     })
 }
