@@ -115,9 +115,9 @@ fn sync_backups(backup_config: &config::Backup) -> EmptyResult {
 
     let mut cloud_storage = match backup_config.provider {
         config::Provider::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
-            Storage::new(Dropbox::new(&client_id, &client_secret, &refresh_token)?, &backup_config.dst),
+            Storage::new(Dropbox::new(client_id, client_secret, refresh_token)?, &backup_config.dst),
         config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
-            Storage::new(GoogleDrive::new(&client_id, &client_secret, &refresh_token), &backup_config.dst),
+            Storage::new(GoogleDrive::new(client_id, client_secret, refresh_token), &backup_config.dst),
     };
     let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage, false)?;
 

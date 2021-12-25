@@ -125,13 +125,9 @@ impl ReadProvider for Dropbox {
 
         loop {
             let mut response: Response = if let Some(ref cursor) = cursor {
-                self.api_request("/files/list_folder/continue", &ContinueRequest {
-                    cursor: &cursor
-                })
+                self.api_request("/files/list_folder/continue", &ContinueRequest {cursor})
             } else {
-                let response = self.api_request("/files/list_folder", &Request {
-                    path: path
-                });
+                let response = self.api_request("/files/list_folder", &Request {path});
 
                 if let Err(HttpClientError::Api(ref e)) = response {
                     if e.error.tag.as_ref().map(|tag| tag == "path").unwrap_or_default() {

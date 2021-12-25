@@ -48,7 +48,7 @@ impl GoogleDrive {
 
         let mut url = UPLOAD_ENDPOINT.to_owned() + "/files";
         if let Some(ref file_id) = file_id {
-            url = url + "/" + &file_id;
+            url = url + "/" + file_id;
         }
         url += "?uploadType=resumable";
 
@@ -101,7 +101,7 @@ impl GoogleDrive {
             parent_path = "/";
         }
 
-        let parent = match self.stat_path(&parent_path)? {
+        let parent = match self.stat_path(parent_path)? {
             Some(parent) => parent,
             None => return Err!("{:?} directory doesn't exist", parent_path),
         };
@@ -141,7 +141,7 @@ impl GoogleDrive {
             }
             cur_path += component;
 
-            let file = match get_file(files, &cur_path, &component)? {
+            let file = match get_file(files, &cur_path, component)? {
                 Some(file) => file,
                 None => return Ok(None),
             };
@@ -230,26 +230,26 @@ impl GoogleDrive {
     }
 
     fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> Result<HttpRequest<'a, R, E>, GoogleDriveError> {
-        Ok(self.oauth.authenticate(request).map_err(|e| GoogleDriveError::Oauth(e.to_string()))?)
+        self.oauth.authenticate(request).map_err(|e| GoogleDriveError::Oauth(e.to_string()))
     }
 
     fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>
         where R: de::DeserializeOwned + 'static
     {
-        Ok(self.authenticate(
+        self.authenticate(
             HttpRequest::new_json(
                 method, API_ENDPOINT.to_owned() + path,
                 Duration::from_secs(API_REQUEST_TIMEOUT))
-        )?)
+        )
     }
 
     fn delete_request(&self, path: &str) -> Result<HttpRequest<HttpResponse, GoogleDriveApiError>, GoogleDriveError> {
-        Ok(self.authenticate(
+        self.authenticate(
             HttpRequest::new(
                 Method::DELETE, API_ENDPOINT.to_owned() + path,
                 Duration::from_secs(API_REQUEST_TIMEOUT),
                 RawResponseReader::new(), JsonErrorReader::new())
-        )?)
+        )
     }
 
     fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {

@@ -88,7 +88,7 @@ impl Backup {
             return Ok(true);
         }
 
-        let metadata_file = provider.open_file(&metadata_path)
+        let metadata_file = provider.open_file(metadata_path)
             .map(BzDecoder::new).map(BufReader::new)
             .map_err(|e| format!("Unable to open metadata file: {}", e))?;
 

@@ -131,7 +131,7 @@ impl Storage {
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
-        let backup_time = chrono::offset::Local.datetime_from_str(&backup_name, "%Y.%m.%d-%H:%M:%S")
+        let backup_time = chrono::offset::Local.datetime_from_str(backup_name, "%Y.%m.%d-%H:%M:%S")
             .map_err(|_| format!("Invalid backup name: {:?}", backup_name))?;
 
         Ok(SystemTime::from(backup_time))
