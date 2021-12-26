@@ -1,12 +1,13 @@
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
-mod backup;
+mod backuper;
 mod check;
 mod cli;
 mod config;
 mod encryptor;
 mod hash;
 mod http_client;
+mod metadata;
 mod metrics;
 mod oauth;
 mod provider;
@@ -56,7 +57,7 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
         "Error while reading {:?} configuration file: {}", config_path, e))?;
 
     match parser.parse()? {
-        Action::Backup {name} => backup::backup(config.get_backup(&name)?),
+        Action::Backup {name} => backuper::backup(config.get_backup(&name)?),
         Action::Upload => uploader::upload(&config),
     }
 }

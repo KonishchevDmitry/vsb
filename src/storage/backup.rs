@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
 
-use bzip2::read::BzDecoder;
 use log::{warn, error};
 
 use crate::core::GenericResult;
+use crate::metadata::MetadataReader;
 use crate::provider::{ReadProvider, FileType};
 
 
@@ -95,9 +94,8 @@ impl Backup {
             return Ok(true);
         }
 
-        let metadata_file = provider.open_file(metadata_path)
-            .map(BzDecoder::new).map(BufReader::new)
-            .map_err(|e| format!("Unable to open metadata file: {}", e))?;
+        let metadata_file = provider.open_file(metadata_path).map_err(|e| format!(
+            "Unable to open metadata file: {}", e))?;
 
         let mut recoverable = true;
         let mut stat = BackupInnerStat {
@@ -107,40 +105,22 @@ impl Backup {
             unique_size: 0,
         };
 
-        for line in metadata_file.lines() {
-            let line = line.map_err(|e| format!("Error while reading metadata file: {}", e))?;
+        for file in MetadataReader::new(metadata_file) {
+            let file = file.map_err(|e| format!("Error while reading metadata file: {}", e))?;
 
-            let mut parts = line.splitn(4, ' ');
-            let checksum = parts.next();
-            let status = parts.next();
-            let fingerprint = parts.next();
-            let filename = parts.next();
-
-            let (checksum, unique, fingerprint, filename) = match (checksum, status, fingerprint, filename) {
-                (Some(checksum), Some(status), Some(fingerprint), Some(filename))
-                if status == "extern" || status == "unique" => (
-                    checksum, status == "unique", fingerprint, filename,
-                ),
-                _ => return Err!("Error while reading metadata file: it has an unsupported format"),
-            };
-
-            let size = fingerprint.rsplit(':').next().unwrap();
-            let size: u64 = size.parse().map_err(|_| format!(
-                "Error while reading metadata file: Invalid file size: {:?}", size))?;
-
-            if unique {
+            if file.unique {
                 stat.unique_files += 1;
-                stat.unique_size += size;
-                available_checksums.insert(checksum.to_owned());
+                stat.unique_size += file.size;
+                available_checksums.insert(file.checksum);
             } else {
                 stat.extern_files += 1;
-                stat.extern_size += size;
+                stat.extern_size += file.size;
 
-                if !available_checksums.contains(checksum) {
+                if !available_checksums.contains(&file.checksum) {
                     error!(concat!(
                         "{:?} backup on {} is not recoverable: ",
                         "unable to find extern {:?} file in the backup group."
-                    ), self.name, provider.name(), filename);
+                    ), self.name, provider.name(), file.path);
                     recoverable = false;
                 }
             }

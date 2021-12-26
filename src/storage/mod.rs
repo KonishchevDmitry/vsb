@@ -90,7 +90,7 @@ impl Storage {
             },
             _ => {
                 let group_name = now.format(BackupGroup::NAME_FORMAT).to_string();
-                if groups.iter().find(|group| group.name == group_name).is_some() {
+                if groups.iter().any(|group| group.name == group_name) {
                     return Err!("Unable to create new backup group ({}): it already exists", group_name);
                 }
                 self.create_backup_group(&group_name)?
