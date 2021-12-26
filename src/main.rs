@@ -1,3 +1,6 @@
+// FIXME(konishchev): Drop
+#![feature(io_error_more)]
+
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
 mod backuper;
