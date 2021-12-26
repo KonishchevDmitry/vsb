@@ -30,6 +30,10 @@ pub struct Config {
 pub struct BackupConfig {
     #[validate(length(min = 1))]
     pub name: String,
+    pub path: String,
+
+    #[validate(range(min = 1))]
+    pub max_backups: usize,
 
     // FIXME(konishchev): Rewrite
     #[validate]
@@ -41,7 +45,7 @@ pub struct BackupConfig {
 pub struct UploadConfig {
     pub src: String,
     pub dst: String,
-    pub provider: Provider,
+    pub provider: ProviderConfig,
     pub max_backup_groups: usize,
     pub encryption_passphrase: String,
     #[serde(default)]
@@ -51,7 +55,7 @@ pub struct UploadConfig {
 
 #[derive(Deserialize)]
 #[serde(tag = "name")]
-pub enum Provider {
+pub enum ProviderConfig {
     #[serde(rename = "dropbox")]
     Dropbox {
         /*
@@ -98,6 +102,8 @@ impl Config {
             if !backup_names.insert(&backup.name) {
                 return Err!("Duplicated backup name: {:?}", backup.name);
             }
+
+            backup.path = validate_local_path(&backup.path)?;
 
             if let Some(upload) = backup.upload.as_mut() {
                 upload.src = validate_local_path(&upload.src)?;

@@ -15,6 +15,15 @@ pub struct BackupGroup {
 }
 
 impl BackupGroup {
+    pub const NAME_FORMAT: &'static str = "%Y.%m.%d";
+
+    pub fn new(name: &str) -> BackupGroup {
+        BackupGroup {
+            name: name.to_owned(),
+            backups: Vec::new(),
+        }
+    }
+
     pub fn list(provider: &dyn ReadProvider, path: &str) -> GenericResult<(Vec<BackupGroup>, bool)> {
         let mut ok = true;
         let mut backup_groups = Vec::new();
@@ -53,10 +62,7 @@ impl BackupGroup {
         let mut ok = true;
         let mut first = true;
 
-        let mut group = BackupGroup {
-            name: name.to_owned(),
-            backups: Vec::new(),
-        };
+        let mut group = BackupGroup::new(name);
         let backup_file_traits = BackupFileTraits::get_for(provider.type_());
 
         let mut files = provider.list_directory(path)?.ok_or_else(||
@@ -115,7 +121,7 @@ impl BackupGroup {
 
         for backup in &mut self.backups {
             match backup.inspect(provider, &mut available_checksums) {
-                Ok(recoverable) => ok = ok && recoverable,
+                Ok(recoverable) => ok &= recoverable,
                 Err(err) => {
                     error!("{:?} backup on {} validation error: {}.",
                            backup.path, provider.name(), err);

@@ -29,14 +29,20 @@ pub struct BackupOuterStat {
 }
 
 impl Backup {
-    pub fn read(provider: &dyn ReadProvider, name: &str, path: &str, archive: bool) -> GenericResult<Backup> {
-        let mut backup = Backup {
+    pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S";
+
+    pub fn new(path: &str, name: &str) -> Backup {
+        Backup {
             path: path.to_owned(),
             name: name.to_owned(),
             metadata_path: None,
             inner_stat: None,
             outer_stat: None,
-        };
+        }
+    }
+
+    pub fn read(provider: &dyn ReadProvider, name: &str, path: &str, archive: bool) -> GenericResult<Backup> {
+        let mut backup = Backup::new(path, name);
 
         if archive {
             return Ok(backup)

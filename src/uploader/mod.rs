@@ -7,7 +7,7 @@ use nix::errno::Errno;
 use nix::fcntl::{self, FlockArg};
 
 use crate::check;
-use crate::config::{self, Config, BackupConfig};
+use crate::config::{Config, BackupConfig, ProviderConfig};
 use crate::core::{EmptyResult, GenericResult};
 use crate::metrics;
 use crate::providers::dropbox::Dropbox;
@@ -70,9 +70,9 @@ fn sync_backups(backup_config: &BackupConfig) -> EmptyResult {
     }
 
     let mut cloud_storage = match upload_config.provider {
-        config::Provider::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
+        ProviderConfig::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(Dropbox::new(client_id, client_secret, refresh_token)?, &upload_config.dst),
-        config::Provider::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
+        ProviderConfig::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(GoogleDrive::new(client_id, client_secret, refresh_token), &upload_config.dst),
     };
     let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage, false)?;

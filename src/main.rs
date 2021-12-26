@@ -1,5 +1,6 @@
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
+mod backup;
 mod check;
 mod cli;
 mod config;
@@ -54,11 +55,8 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
     let config = Config::load(config_path).map_err(|e| format!(
         "Error while reading {:?} configuration file: {}", config_path, e))?;
 
-    Ok(match parser.parse()? {
-        Action::Backup {name} => {
-            config.get_backup(&name)?;
-            true
-        },
-        Action::Upload => uploader::upload(&config)?,
-    })
+    match parser.parse()? {
+        Action::Backup {name} => backup::backup(config.get_backup(&name)?),
+        Action::Upload => uploader::upload(&config),
+    }
 }

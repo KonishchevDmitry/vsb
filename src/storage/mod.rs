@@ -5,13 +5,13 @@ mod helpers;
 
 use std::time::SystemTime;
 
+use chrono::{self, offset::Local, TimeZone};
 use log::info;
-use chrono::{self, TimeZone};
 use rayon::prelude::*;
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::encryptor::Encryptor;
-use crate::provider::{ReadProvider, WriteProvider};
+use crate::provider::{FileType, ReadProvider, WriteProvider};
 use crate::stream_splitter;
 use crate::util;
 
@@ -45,13 +45,18 @@ impl Storage {
         self.provider.read().name()
     }
 
+    // FIXME(konishchev): Rewrite
+    fn clarification(&self) -> String {
+        format!(" on {}", self.name())
+    }
+
     pub fn get_backup_groups(&self, verify: bool) -> GenericResult<(Vec<BackupGroup>, bool)> {
         let provider = self.provider.read();
         let (mut groups, mut ok) = BackupGroup::list(provider, &self.path)?;
 
         if verify && !groups.is_empty() {
             info!("Verifying backups on {}...", self.name());
-            ok &= groups.par_iter_mut().map(|group| {
+            ok &= groups.par_iter_mut().map(|group: &mut BackupGroup| {
                 group.inspect(provider)
             }).all(|result| result);
         }
@@ -59,12 +64,51 @@ impl Storage {
         Ok((groups, ok))
     }
 
-    pub fn create_backup_group(&mut self, group_name: &str) -> EmptyResult {
-        let group_path = self.get_backup_group_path(group_name);
-        self.provider.write()?.create_directory(&group_path)
+    pub fn create_backup_group(&self, name: &str) -> GenericResult<BackupGroup> {
+        info!("Creating {:?} backup group{}...", name, self.clarification());
+        let path = self.get_backup_group_path(name);
+        self.provider.write()?.create_directory(&path)?;
+        Ok(BackupGroup::new(name))
     }
 
-    pub fn upload_backup(&mut self, local_backup_path: &str, group_name: &str, backup_name: &str,
+    pub fn create_backup(&self, max_backups: usize) -> GenericResult<Backup> {
+        let provider = self.provider.write()?;
+
+        let backup_file_traits = BackupFileTraits::get_for(provider.type_());
+        if backup_file_traits.type_ != FileType::Directory {
+            return Err!("Backup creation is not supported for {} provider", provider.name());
+        }
+
+        let now = Local::now();
+        let (mut groups, _ok) = self.get_backup_groups(false)?;
+
+        let group = match groups.last() {
+            Some(group) if group.backups.len() < max_backups => {
+                // FIXME(konishchev): Cleanup group from temporary files?
+                info!("Using {:?} backup group{}.", group.name, self.clarification());
+                groups.pop().unwrap()
+            },
+            _ => {
+                let group_name = now.format(BackupGroup::NAME_FORMAT).to_string();
+                if groups.iter().find(|group| group.name == group_name).is_some() {
+                    return Err!("Unable to create new backup group ({}): it already exists", group_name);
+                }
+                self.create_backup_group(&group_name)?
+            },
+        };
+
+        // FIXME(konishchev): HERE
+        let backup_name = now.format(Backup::NAME_FORMAT).to_string();
+        let backup_path = self.get_backup_path(&group.name, &backup_name, true);
+        let backup = Backup::new(&backup_path, &backup_name);
+
+        info!("Creating {:?} backup{}...", backup.name, self.clarification());
+        provider.create_directory(&backup.path)?;
+
+        Ok(backup)
+    }
+
+    pub fn upload_backup(&self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
         let provider = self.provider.write()?;
         let (encryptor, data_stream) = Encryptor::new(encryption_passphrase, provider.hasher())?;
@@ -106,7 +150,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn delete_backup_group(&mut self, group_name: &str) -> EmptyResult {
+    pub fn delete_backup_group(&self, group_name: &str) -> EmptyResult {
         let group_path = self.get_backup_group_path(group_name);
         self.provider.write()?.delete(&group_path)
     }
@@ -115,8 +159,8 @@ impl Storage {
         self.path.trim_end_matches('/').to_owned() + "/" + group_name
     }
 
-    pub fn get_backup_path(&self, group_name: &str, backup_name: &str) -> String {
-        self.get_backup_group_path(group_name) + "/" + &self.get_backup_file_name(backup_name, false)
+    pub fn get_backup_path(&self, group_name: &str, backup_name: &str, temporary: bool) -> String {
+        self.get_backup_group_path(group_name)+ "/" + &self.get_backup_file_name(backup_name, temporary)
     }
 
     fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {
@@ -132,7 +176,7 @@ impl Storage {
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
-        let backup_time = chrono::offset::Local.datetime_from_str(backup_name, "%Y.%m.%d-%H:%M:%S")
+        let backup_time = Local.datetime_from_str(backup_name, Backup::NAME_FORMAT)
             .map_err(|_| format!("Invalid backup name: {:?}", backup_name))?;
 
         Ok(SystemTime::from(backup_time))

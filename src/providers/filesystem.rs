@@ -1,8 +1,10 @@
 use std::fs;
 use std::io;
 
-use crate::core::GenericResult;
-use crate::provider::{Provider, ProviderType, ReadProvider, File, FileType};
+use crate::core::{EmptyResult, GenericResult};
+use crate::hash::Hasher;
+use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use crate::stream_splitter::ChunkStreamReceiver;
 
 pub struct Filesystem {
 }
@@ -65,5 +67,33 @@ impl ReadProvider for Filesystem {
 
     fn open_file(&self, path: &str) -> GenericResult<Box<dyn io::Read>> {
         Ok(Box::new(fs::File::open(path)?))
+    }
+}
+
+impl WriteProvider for Filesystem {
+    // FIXME(konishchev): Implement
+    fn hasher(&self) -> Box<dyn Hasher> {
+        unreachable!()
+    }
+
+    // FIXME(konishchev): Implement
+    fn max_request_size(&self) -> Option<u64> {
+        unreachable!()
+    }
+
+    // FIXME(konishchev): Implement
+    fn create_directory(&self, path: &str) -> EmptyResult {
+        Ok(fs::create_dir(path)?)
+    }
+
+    // FIXME(konishchev): Implement
+    fn upload_file(&self, _directory_path: &str, _temp_name: &str, _name: &str,
+                   _chunk_streams: ChunkStreamReceiver) -> EmptyResult {
+        unreachable!()
+    }
+
+    // FIXME(konishchev): Implement
+    fn delete(&self, _path: &str) -> EmptyResult {
+        unreachable!()
     }
 }
