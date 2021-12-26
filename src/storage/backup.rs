@@ -29,6 +29,7 @@ pub struct BackupOuterStat {
 
 impl Backup {
     pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S";
+    pub const METADATA_NAME: &'static str = "metadata.bz2";
 
     pub fn new(path: &str, name: &str) -> Backup {
         Backup {
@@ -54,9 +55,8 @@ impl Backup {
             .map(|file| (file.name, file.size))
             .collect();
 
-        let metadata_name = "metadata.bz2";
-        let metadata_size = if let Some(size) = backup_files.get(metadata_name).copied() {
-            backup.metadata_path.replace(format!("{}/{}", path, metadata_name));
+        let metadata_size = if let Some(size) = backup_files.get(Backup::METADATA_NAME).copied() {
+            backup.metadata_path.replace(format!("{}/{}", path, Backup::METADATA_NAME));
             size
         } else {
             return Err!("The backup is corrupted: metadata file is missing");

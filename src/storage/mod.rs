@@ -71,7 +71,7 @@ impl Storage {
         Ok(BackupGroup::new(name))
     }
 
-    pub fn create_backup(&self, max_backups: usize) -> GenericResult<Backup> {
+    pub fn create_backup(&self, max_backups: usize) -> GenericResult<(BackupGroup, Backup)> {
         let provider = self.provider.write()?;
 
         let backup_file_traits = BackupFileTraits::get_for(provider.type_());
@@ -97,7 +97,6 @@ impl Storage {
             },
         };
 
-        // FIXME(konishchev): HERE
         let backup_name = now.format(Backup::NAME_FORMAT).to_string();
         let backup_path = self.get_backup_path(&group.name, &backup_name, true);
         let backup = Backup::new(&backup_path, &backup_name);
@@ -105,7 +104,8 @@ impl Storage {
         info!("Creating {:?} backup{}...", backup.name, self.clarification());
         provider.create_directory(&backup.path)?;
 
-        Ok(backup)
+        // FIXME(konishchev): Add to group?
+        Ok((group, backup))
     }
 
     pub fn upload_backup(&self, local_backup_path: &str, group_name: &str, backup_name: &str,

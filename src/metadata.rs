@@ -1,7 +1,8 @@
-use std::io::{Read, BufRead, BufReader, Lines};
+use std::io::{Read, BufRead, BufReader, Lines, Write, BufWriter};
 
 use bzip2::read::BzDecoder;
-use crate::core::GenericResult;
+
+use crate::core::{EmptyResult, GenericResult};
 
 pub struct MetadataItem {
     pub path: String,
@@ -51,5 +52,28 @@ impl Iterator for MetadataReader {
                 size, unique
             })
         })
+    }
+}
+
+// FIXME(konishchev): flush + fsync
+pub struct MetadataWriter {
+    writer: Box<dyn Write>,
+}
+
+impl MetadataWriter {
+    pub fn new<W: Write + 'static>(writer: W) -> MetadataWriter {
+        MetadataWriter {
+            writer: Box::new(BufWriter::new(writer))
+        }
+    }
+
+    // FIXME(konishchev): Validate params
+    #[allow(dead_code)] // FIXME(konishchev): Drop
+    pub fn write(&mut self, item: &MetadataItem) -> EmptyResult {
+        let status = match item.unique {
+            true => "unique",
+            false => "extern",
+        };
+        Ok(write!(&mut self.writer, "{} {} {} {}", item.checksum, status, item.size, item.path)?)
     }
 }
