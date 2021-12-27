@@ -1,3 +1,6 @@
+// FIXME(konishchev): Drop
+#![allow(clippy::module_inception)]
+
 mod backup;
 mod backuper;
 
@@ -9,12 +12,12 @@ use crate::storage::Storage;
 use self::backup::BackupFile;
 use self::backuper::Backuper;
 
+// FIXME(konishchev): Implement
 pub fn backup(backup_config: &BackupConfig) -> GenericResult<bool> {
     let storage = Storage::new(Filesystem::new(), &backup_config.path);
     let _backup = BackupFile::create(backup_config, storage)?;
 
-    let mut backuper = Backuper::new(backup_config)?;
-    let ok = backuper.run();
+    let backuper = Backuper::new(backup_config)?;
 
-    Ok(ok)
+    Ok(backuper.run().is_ok())
 }

@@ -11,22 +11,22 @@ use crate::core::GenericResult;
 
 pub struct Backuper {
     items: Vec<BackupItemConfig>,
-    ok: Cell<bool>,
+    result: Cell<Result<(), ()>>,
 }
 
 impl Backuper {
     pub fn new(config: &BackupConfig) -> GenericResult<Backuper> {
         let items = config.items.clone().ok_or(
             "Backup items aren't configured for the specified backup")?;
-        Ok(Backuper {items, ok: Cell::new(true)})
+        Ok(Backuper {items, result: Cell::new(Ok(()))})
     }
 
-    // FIXME(konishchev): Implement
-    pub fn run(&self) -> bool {
+    // FIXME(konishchev): Implement + fsync
+    pub fn run(&self) -> Result<(), ()> {
         for item in &self.items {
             self.backup_path(&item.path, true);
         }
-        self.ok.get()
+        self.result.get()
     }
 
     fn backup_path(&self, path: &str, top_level: bool) {
@@ -34,7 +34,7 @@ impl Backuper {
 
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
-            Err(err) => return self.handle_read_error(path, top_level, err),
+            Err(err) => return self.handle_access_error(path, top_level, err, None),
         };
 
         let file_type = metadata.file_type();
@@ -42,11 +42,11 @@ impl Backuper {
         if file_type.is_file() {
             self.backup_file(path, top_level);
         } else if file_type.is_dir() {
-            // FIXME(konishchev): HERE
             self.backup_directory(path, top_level);
         } else if file_type.is_symlink() {
             self.backup_symlink(path, top_level);
         } else {
+            // FIXME(konishchev): Support
             unimplemented!();
         }
     }
@@ -54,23 +54,22 @@ impl Backuper {
     fn backup_directory(&self, path: &str, top_level: bool) {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
-            Err(err) => return match err.kind() {
-                ErrorKind::NotADirectory => self.handle_type_change(path, top_level),
-                _ => self.handle_read_error(path, top_level, err),
-            },
+            Err(err) => return self.handle_access_error(
+                path, top_level, err, Some(ErrorKind::NotADirectory)),
         };
 
         for entry in entries {
             let entry = match entry {
                 Ok(entry) => entry,
-                Err(err) => return self.handle_read_error(path, top_level, err),
+                Err(err) => return self.handle_access_error(path, top_level, err, None),
             };
 
             let path = entry.path();
             let path = match path.to_str() {
                 Some(path) => path,
                 None => {
-                    self.handle_error(format_args!("Failed to backup {:?}: invalid path", path.to_string_lossy()));
+                    self.handle_error(format_args!(
+                        "Failed to backup {:?}: invalid path", path.to_string_lossy()));
                     continue;
                 },
             };
@@ -79,22 +78,21 @@ impl Backuper {
         }
     }
 
+    // FIXME(konishchev): Drop
+    #[allow(clippy::needless_return)]
     fn backup_file(&self, path: &str, top_level: bool) {
         let mut open_options = OpenOptions::new();
         open_options.read(true).custom_flags(OFlag::O_NOFOLLOW.bits());
 
         let file = match open_options.open(path) {
             Ok(file) => file,
-            Err(err) => return match err.kind() {
-                // When O_NOFOLLOW is specified, indicates that this is a symbolic link
-                ErrorKind::FilesystemLoop => self.handle_type_change(path, top_level),
-                _ => self.handle_read_error(path, top_level, err),
-            },
+            Err(err) => return self.handle_access_error(
+                path, top_level, err, Some(ErrorKind::FilesystemLoop)),
         };
 
         let metadata = match file.metadata() {
             Ok(metadata) => metadata,
-            Err(err) => return self.handle_read_error(path, top_level, err),
+            Err(err) => return self.handle_access_error(path, top_level, err, None),
         };
 
         if !metadata.is_file() {
@@ -107,25 +105,27 @@ impl Backuper {
     fn backup_symlink(&self, path: &str, top_level: bool) {
         let _target = match fs::read_link(path) {
             Ok(target) => target,
-            Err(err) => return match err.kind() {
-                ErrorKind::InvalidInput => self.handle_type_change(path, top_level),
-                _ => self.handle_read_error(path, top_level, err),
-            },
+            Err(err) => return self.handle_access_error(path, top_level, err, Some(ErrorKind::InvalidInput)),
         };
 
         // FIXME(konishchev): Add to backup
     }
 
-    fn handle_read_error(&self, path: &str, top_level: bool, err: io::Error) {
+    fn handle_access_error(&self, path: &str, top_level: bool, err: io::Error, type_change_kind: Option<ErrorKind>) {
+        if matches!(type_change_kind, Some(kind) if kind == err.kind()) {
+            return self.handle_type_change(path, top_level);
+        }
+
         if err.kind() == ErrorKind::NotFound && !top_level {
             return warn!("Failed to backup {:?}: it was deleted during backing up.", path);
         }
 
-        return self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));
+        self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));
     }
 
     fn handle_type_change(&self, path: &str, top_level: bool) {
-        let mut handle = |message| {
+        // We can't save format_args!() result to a variable, so have to use closure
+        let handle = |message| {
             if top_level {
                 self.handle_error(message);
             } else {
@@ -137,7 +137,7 @@ impl Backuper {
 
     fn handle_error(&self, message: std::fmt::Arguments) {
         error!("{}.", message);
-        self.ok.set(false);
+        self.result.set(Err(()));
     }
 }
 
