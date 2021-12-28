@@ -1,4 +1,7 @@
+use std::fs;
 use std::io::{Read, BufRead, BufReader, Lines, Write, BufWriter};
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 
 use bzip2::Compression;
 use bzip2::read::BzDecoder;
@@ -8,9 +11,90 @@ use crate::core::{EmptyResult, GenericResult};
 
 pub struct MetadataItem {
     pub path: String,
-    pub size: u64,
     pub unique: bool,
     pub checksum: String,
+
+    device: u64,
+    inode: u64,
+    mtime_nsec: i128,
+
+    pub size: u64,
+}
+
+impl MetadataItem {
+    pub fn new(path: &Path, metadata: &fs::Metadata, unique: bool) -> GenericResult<MetadataItem> {
+        let path = validate_path(path)?;
+
+        Ok(MetadataItem {
+            path: path.to_owned(),
+            unique,
+            // FIXME(konishchev): Implement
+            checksum: "".to_string(),
+
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
+
+            size: metadata.size(),
+        })
+    }
+
+    fn encode(&self, writer: &mut dyn Write) -> EmptyResult {
+        let status = match self.unique {
+            true => "unique",
+            false => "extern",
+        };
+
+        Ok(write!(
+            writer, "{status} {checksum} {device}:{inode}:{mtime} {size} {path}\n",
+            status=status, checksum=self.checksum, device=self.device, inode=self.inode,
+            mtime=self.mtime_nsec, size=self.size, path=self.path,
+        )?)
+    }
+
+    fn decode(line: &str) -> GenericResult<MetadataItem> {
+        let mut parts = line.splitn(5, ' ');
+        let error = || format!("Unexpected format: {:?}", line);
+
+        let unique = parts.next().and_then(|status| match status {
+            "extern" => Some(false),
+            "unique" => Some(true),
+            _ => None,
+        }).ok_or_else(error)?;
+
+        let checksum = parts.next().ok_or_else(error)?.to_owned();
+        let (device, inode, mtime_nsec) = parts.next().and_then(|fingerprint: &str| {
+            let mut parts = fingerprint.split(':');
+
+            let device = parts.next().and_then(|v| v.parse::<u64>().ok());
+            let inode = parts.next().and_then(|v| v.parse::<u64>().ok());
+            let mtime = parts.next().and_then(|v| v.parse::<i128>().ok());
+
+            match (device, inode, mtime, parts.next()) {
+                (Some(device), Some(inode), Some(mtime), None) => Some((device, inode, mtime)),
+                _ => None,
+            }
+        }).ok_or_else(error)?;
+
+        let size = parts.next().and_then(|v| v.parse::<u64>().ok()).ok_or_else(error)?;
+        let path = parts.next().ok_or_else(error)?.to_owned();
+
+        Ok(MetadataItem {
+            path, unique, checksum,
+            device, inode, mtime_nsec,
+            size,
+        })
+    }
+}
+
+pub fn validate_path(path: &Path) -> GenericResult<&str> {
+    Ok(path.to_str().and_then(|path: &str| {
+        if path.contains('\n') {
+            None
+        } else {
+            Some(path)
+        }
+    }).ok_or("invalid path")?)
 }
 
 pub struct MetadataReader {
@@ -28,32 +112,7 @@ impl Iterator for MetadataReader {
     type Item = GenericResult<MetadataItem>;
 
     fn next(&mut self) -> Option<GenericResult<MetadataItem>> {
-        self.lines.next().map(|line| {
-            let line = line?;
-
-            let mut parts = line.splitn(4, ' ');
-            let checksum = parts.next();
-            let status = parts.next();
-            let fingerprint = parts.next();
-            let path = parts.next();
-
-            let (checksum, unique, fingerprint, path) = match (checksum, status, fingerprint, path) {
-                (Some(checksum), Some(status), Some(fingerprint), Some(filename))
-                if status == "extern" || status == "unique" => (
-                    checksum, status == "unique", fingerprint, filename,
-                ),
-                _ => return Err!("Unexpected format: {:?}", line),
-            };
-
-            let size = fingerprint.rsplit(':').next().unwrap();
-            let size: u64 = size.parse().map_err(|_| format!("Invalid file size: {:?}", size))?;
-
-            Ok(MetadataItem {
-                path: path.to_owned(),
-                checksum: checksum.to_owned(),
-                size, unique
-            })
-        })
+        self.lines.next().map(|line| MetadataItem::decode(&line?))
     }
 }
 
@@ -70,13 +129,7 @@ impl MetadataWriter {
         }
     }
 
-    // FIXME(konishchev): Validate params
-    #[allow(dead_code)] // FIXME(konishchev): Drop
     pub fn write(&mut self, item: &MetadataItem) -> EmptyResult {
-        let status = match item.unique {
-            true => "unique",
-            false => "extern",
-        };
-        Ok(write!(&mut self.writer, "{} {} {} {}", item.checksum, status, item.size, item.path)?)
+        item.encode(&mut self.writer)
     }
 }

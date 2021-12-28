@@ -9,7 +9,7 @@ use tar::Header;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
-use crate::metadata::MetadataWriter;
+use crate::metadata::{MetadataItem, MetadataWriter};
 use crate::storage::{Storage, Backup};
 
 pub struct BackupFile {
@@ -44,6 +44,17 @@ impl BackupFile {
     pub fn add_directory(&mut self, path: &Path, metadata: &fs::Metadata) -> EmptyResult {
         let mut header = tar_header(metadata);
         Ok(self.data.append_data(&mut header, tar_path(path)?, io::empty())?)
+    }
+
+    // FIXME(konishchev): Handle file truncation properly
+    pub fn add_file(&mut self, path: &Path, fs_metadata: &fs::Metadata, file: File) -> EmptyResult {
+        let mut header = tar_header(fs_metadata);
+        self.data.append_data(&mut header, tar_path(path)?, file)?;
+
+        let metadata = MetadataItem::new(path, fs_metadata, true)?;
+        self.metadata.write(&metadata)?;
+
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use log::{info, warn, error};
@@ -39,6 +39,11 @@ impl Backuper {
 
     fn backup_path(&mut self, path: &Path, top_level: bool) -> EmptyResult {
         info!("Backing up {:?}...", path);
+
+        if let Err(err) = crate::metadata::validate_path(path) {
+            self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));
+            return Ok(());
+        }
 
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
@@ -96,7 +101,7 @@ impl Backuper {
         Ok(())
     }
 
-    fn backup_file(&self, path: &Path, top_level: bool) -> EmptyResult {
+    fn backup_file(&mut self, path: &Path, top_level: bool) -> EmptyResult {
         let mut open_options = OpenOptions::new();
         open_options.read(true).custom_flags(OFlag::O_NOFOLLOW.bits());
 
@@ -121,7 +126,14 @@ impl Backuper {
             return Ok(());
         }
 
-        // FIXME(konishchev): Add to backup
+        let hard_links = metadata.nlink();
+        if hard_links > 1 {
+            warn!("{:?} has {} hard links.", path, hard_links - 1);
+        }
+
+        self.backup.add_file(path, &metadata, file).map_err(|e| format!(
+            "Failed to backup {:?}: {}", path, e))?;
+
         Ok(())
     }
 
