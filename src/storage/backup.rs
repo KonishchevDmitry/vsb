@@ -30,6 +30,7 @@ pub struct BackupOuterStat {
 impl Backup {
     pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S";
     pub const METADATA_NAME: &'static str = "metadata.bz2";
+    pub const DATA_NAME: &'static str = "data.tar.bz2"; // FIXME(konishchev): Variations
 
     pub fn new(path: &str, name: &str) -> Backup {
         Backup {

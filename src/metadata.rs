@@ -1,6 +1,8 @@
 use std::io::{Read, BufRead, BufReader, Lines, Write, BufWriter};
 
+use bzip2::Compression;
 use bzip2::read::BzDecoder;
+use bzip2::write::BzEncoder;
 
 use crate::core::{EmptyResult, GenericResult};
 
@@ -62,6 +64,7 @@ pub struct MetadataWriter {
 
 impl MetadataWriter {
     pub fn new<W: Write + 'static>(writer: W) -> MetadataWriter {
+        let writer = BzEncoder::new(writer, Compression::best());
         MetadataWriter {
             writer: Box::new(BufWriter::new(writer))
         }
