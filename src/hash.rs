@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Debug, LowerHex, Formatter};
+use std::fmt::{self, Display, Debug, Formatter};
 use std::io::{self, Write};
 
 use digest::Digest;
@@ -14,10 +14,16 @@ impl From<&[u8]> for Hash {
 
 impl Display for Hash {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for byte in &self.0 {
-            LowerHex::fmt(byte, f)?;
+        static CHARS: &[u8; 16] = b"0123456789abcdef";
+
+        let mut data = Vec::with_capacity(self.0.len() * 2);
+        for &byte in &self.0 {
+            data.push(CHARS[(byte >> 4) as usize]);
+            data.push(CHARS[(byte & 0xF) as usize]);
         }
-        Ok(())
+
+        let string = std::str::from_utf8(data.as_slice()).unwrap();
+        Display::fmt(string, f)
     }
 }
 
