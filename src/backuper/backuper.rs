@@ -60,7 +60,7 @@ impl Backuper {
         } else if file_type.is_dir() {
             self.backup_directory(path, top_level, metadata)?;
         } else if file_type.is_symlink() {
-            self.backup_symlink(path, top_level)?;
+            self.backup_symlink(path, top_level, metadata)?;
         } else {
             // FIXME(konishchev): Support
             unimplemented!();
@@ -131,14 +131,12 @@ impl Backuper {
             warn!("{:?} has {} hard links.", path, hard_links - 1);
         }
 
-        self.backup.add_file(path, &metadata, file).map_err(|e| format!(
-            "Failed to backup {:?}: {}", path, e))?;
-
-        Ok(())
+        Ok(self.backup.add_file(path, &metadata, file).map_err(|e| format!(
+            "Failed to backup {:?}: {}", path, e))?)
     }
 
-    fn backup_symlink(&self, path: &Path, top_level: bool) -> EmptyResult {
-        let _target = match fs::read_link(path) {
+    fn backup_symlink(&mut self, path: &Path, top_level: bool, metadata: Metadata) -> EmptyResult {
+        let target = match fs::read_link(path) {
             Ok(target) => target,
             Err(err) => {
                 self.handle_access_error(path, top_level, err, Some(ErrorKind::InvalidInput));
@@ -146,8 +144,8 @@ impl Backuper {
             },
         };
 
-        // FIXME(konishchev): Add to backup
-        Ok(())
+        Ok(self.backup.add_symlink(path, &metadata, &target).map_err(|e| format!(
+            "Failed to backup {:?}: {}", path, e))?)
     }
 
     fn handle_access_error(

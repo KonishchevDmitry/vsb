@@ -61,6 +61,11 @@ impl BackupFile {
 
         Ok(())
     }
+
+    pub fn add_symlink(&mut self, path: &Path, metadata: &fs::Metadata, target: &Path) -> EmptyResult {
+        let mut header = tar_header(metadata);
+        Ok(self.data.append_link(&mut header, tar_path(path)?, target)?)
+    }
 }
 
 fn tar_path(path: &Path) -> GenericResult<&Path> {
