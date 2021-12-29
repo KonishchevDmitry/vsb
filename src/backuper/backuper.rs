@@ -14,15 +14,16 @@ use crate::core::{EmptyResult, GenericResult};
 pub struct Backuper {
     items: Vec<BackupItemConfig>,
     backup: BackupFile,
+    test_mode: bool,
     // FIXME(konishchev): Drop Cell?
     result: Cell<Result<(), ()>>,
 }
 
 impl Backuper {
-    pub fn new(config: &BackupConfig, backup: BackupFile) -> GenericResult<Backuper> {
+    pub fn new(config: &BackupConfig, backup: BackupFile, test_mode: bool) -> GenericResult<Backuper> {
         let items = config.items.clone().ok_or(
             "Backup items aren't configured for the specified backup")?;
-        Ok(Backuper {items, backup, result: Cell::new(Ok(()))})
+        Ok(Backuper {items, backup, test_mode, result: Cell::new(Ok(()))})
     }
 
     // FIXME(konishchev): Implement + fsync
@@ -179,6 +180,10 @@ impl Backuper {
     }
 
     fn handle_error(&self, message: std::fmt::Arguments) {
+        // FIXME(konishchev): Return error instead?
+        if self.test_mode {
+            panic!("{}", message);
+        }
         error!("{}.", message);
         self.result.set(Err(()));
     }

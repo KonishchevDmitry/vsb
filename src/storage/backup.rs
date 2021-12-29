@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use log::{warn, error};
+use log::error;
 
 use crate::core::GenericResult;
 use crate::hash::Hash;
@@ -85,19 +85,24 @@ impl Backup {
         Ok(backup)
     }
 
+    pub fn read_metadata(&self, provider: &dyn ReadProvider) -> GenericResult<MetadataReader> {
+        let path = self.metadata_path.as_ref().ok_or(
+            "The backup has no metadata file")?;
+
+        let file = provider.open_file(path).map_err(|e| format!(
+            "Unable to open metadata file: {}", e))?;
+
+        Ok(MetadataReader::new(file))
+    }
+
     pub fn inspect(
         &mut self, provider: &dyn ReadProvider, available_hashes: &mut HashSet<Hash>,
     ) -> GenericResult<bool> {
-        let metadata_path = self.metadata_path.as_ref().ok_or(
-            "The backup has no metadata file")?;
-
-        if cfg!(debug_assertions) {
-            warn!("Skip consistency check of {:?}: running in develop mode.", metadata_path);
-            return Ok(true);
-        }
-
-        let metadata_file = provider.open_file(metadata_path).map_err(|e| format!(
-            "Unable to open metadata file: {}", e))?;
+        // FIXME(konishchev): Tests
+        // if cfg!(debug_assertions) {
+        //     warn!("Skip consistency check of {:?}: running in develop mode.", metadata_path);
+        //     return Ok(true);
+        // }
 
         let mut recoverable = true;
         let mut stat = BackupInnerStat {
@@ -107,7 +112,7 @@ impl Backup {
             unique_size: 0,
         };
 
-        for file in MetadataReader::new(metadata_file) {
+        for file in self.read_metadata(provider)? {
             let file = file.map_err(|e| format!("Error while reading metadata file: {}", e))?;
 
             if file.unique {
