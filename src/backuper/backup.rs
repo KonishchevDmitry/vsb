@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::{Path, Component};
+use std::path::{Path, PathBuf, Component};
 
 use bzip2::Compression;
 use bzip2::write::BzEncoder;
@@ -15,6 +15,9 @@ use crate::storage::{Storage, Backup};
 use super::file_reader::FileReader;
 
 pub struct BackupFile {
+    path: PathBuf,
+    temp_path: PathBuf,
+
     // storage: Storage, // FIXME(konishchev): Ref counter
     #[allow(dead_code)] // FIXME(konishchev): Drop
     metadata: MetadataWriter,
@@ -22,7 +25,6 @@ pub struct BackupFile {
 }
 
 // FIXME(konishchev): Cleanup on error
-// FIXME(konishchev): Fsync
 // FIXME(konishchev): Mark broken on error
 impl BackupFile {
     pub fn create(config: &BackupConfig, storage: Storage) -> GenericResult<BackupFile> {
@@ -40,7 +42,13 @@ impl BackupFile {
         let data_writer: Box<dyn Write> = Box::new(BzEncoder::new(data_file, Compression::best()));
         let data = tar::Builder::new(data_writer);
 
-        Ok(BackupFile {metadata, data})
+        Ok(BackupFile {
+            // FIXME(konishchev): Rewrite
+            path: storage.get_backup_path(&group.name, &backup.name, false).into(),
+            temp_path: storage.get_backup_path(&group.name, &backup.name, true).into(),
+
+            metadata, data,
+        })
     }
 
     pub fn add_directory(&mut self, path: &Path, metadata: &fs::Metadata) -> EmptyResult {
@@ -65,6 +73,12 @@ impl BackupFile {
     pub fn add_symlink(&mut self, path: &Path, metadata: &fs::Metadata, target: &Path) -> EmptyResult {
         let mut header = tar_header(metadata);
         Ok(self.data.append_link(&mut header, tar_path(path)?, target)?)
+    }
+
+    // FIXME(konishchev): Rewrite + to storage?
+    // FIXME(konishchev): Fsync
+    pub fn finish(self) -> EmptyResult {
+        Ok(fs::rename(self.temp_path, self.path)?)
     }
 }
 

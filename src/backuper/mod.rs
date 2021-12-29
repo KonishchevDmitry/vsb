@@ -18,7 +18,6 @@ pub fn backup(backup_config: &BackupConfig) -> GenericResult<bool> {
     let storage = Storage::new(Filesystem::new(), &backup_config.path);
     let backup = BackupFile::create(backup_config, storage)?;
 
-    let mut backuper = Backuper::new(backup_config, backup)?;
-
+    let backuper = Backuper::new(backup_config, backup)?;
     Ok(backuper.run().is_ok())
 }

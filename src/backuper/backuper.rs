@@ -26,7 +26,7 @@ impl Backuper {
     }
 
     // FIXME(konishchev): Implement + fsync
-    pub fn run(&mut self) -> Result<(), ()> {
+    pub fn run(mut self) -> Result<(), ()> {
         // FIXME(konishchev): Drop clone
         for item in &self.items.clone() {
             // FIXME(konishchev): To path?
@@ -34,6 +34,10 @@ impl Backuper {
             // FIXME(konishchev): unwrap
             self.backup_path(path, true).unwrap();
         }
+
+        // FIXME(konishchev): unwrap
+        self.backup.finish().unwrap();
+
         self.result.get()
     }
 
