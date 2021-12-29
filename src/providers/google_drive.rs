@@ -357,7 +357,7 @@ impl WriteProvider for GoogleDrive {
                         Method::GET, &"/files/".to_owned().add(&file.id).add("?fields=md5Checksum"))?;
                     let metadata: Metadata = self.client.send(request)?;
 
-                    if metadata.md5_checksum != checksum {
+                    if metadata.md5_checksum != checksum.to_string() {
                         if let Err(e) = self.delete_file(&temp_path, true) {
                             error!("Failed to delete a temporary {:?} file from {}: {}.",
                                    temp_path, self.name(), e);

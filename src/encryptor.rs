@@ -12,14 +12,14 @@ use log::{debug, error};
 use nix::{fcntl, unistd};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::Hasher;
+use crate::hash::{Hasher, Hash};
 use crate::stream_splitter::{DataSender, DataReceiver, Data};
 use crate::util;
 
 pub struct Encryptor {
     pid: pid_t,
     stdin: Option<BufWriter<ChildStdin>>,
-    stdout_reader: Option<JoinHandle<GenericResult<String>>>,
+    stdout_reader: Option<JoinHandle<GenericResult<Hash>>>,
     encrypted_data_tx: Option<DataSender>,
     result: Option<EmptyResult>,
 }
@@ -177,7 +177,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     Ok((read_fd, write_fd))
 }
 
-fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<String> {
+fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<Hash> {
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
     let mut stderr = gpg.stderr.take().unwrap();
 
@@ -196,7 +196,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> Gen
         }
     })?);
 
-    let checksum = read_data(stdout, hasher, tx).map_err(|err| {
+    let hash = read_data(stdout, hasher, tx).map_err(|err| {
         terminate_gpg(gpg.id() as i32); // To close gpg's stderr
         util::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
@@ -211,10 +211,10 @@ fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> Gen
 
     debug!("gpg process has end its work with successful exit code.");
 
-    Ok(checksum)
+    Ok(hash)
 }
 
-fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<String> {
+fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<dyn Hasher>, tx: DataSender) -> GenericResult<Hash> {
     loop {
         let size = {
             let encrypted_data = stdout.fill_buf().map_err(|e| format!(

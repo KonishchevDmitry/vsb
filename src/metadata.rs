@@ -8,34 +8,29 @@ use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
 
 use crate::core::{EmptyResult, GenericResult};
+use crate::hash::Hash;
 
 pub struct MetadataItem {
     pub path: String,
+    pub size: u64,
+    pub hash: Hash,
     pub unique: bool,
-    pub checksum: String,
 
     device: u64,
     inode: u64,
     mtime_nsec: i128,
-
-    pub size: u64,
 }
 
 impl MetadataItem {
-    pub fn new(path: &Path, metadata: &fs::Metadata, unique: bool) -> GenericResult<MetadataItem> {
-        let path = validate_path(path)?;
+    pub fn new(path: &Path, metadata: &fs::Metadata, size: u64, hash: Hash, unique: bool) -> GenericResult<MetadataItem> {
+        let path = validate_path(path)?.to_owned();
 
         Ok(MetadataItem {
-            path: path.to_owned(),
-            unique,
-            // FIXME(konishchev): Implement
-            checksum: "".to_string(),
+            path, size, hash, unique,
 
             device: metadata.dev(),
             inode: metadata.ino(),
             mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
-
-            size: metadata.size(),
         })
     }
 
@@ -45,9 +40,9 @@ impl MetadataItem {
             false => "extern",
         };
 
-        Ok(write!(
-            writer, "{status} {checksum} {device}:{inode}:{mtime} {size} {path}\n",
-            status=status, checksum=self.checksum, device=self.device, inode=self.inode,
+        Ok(writeln!(
+            writer, "{status} {hash} {device}:{inode}:{mtime} {size} {path}",
+            status=status, hash=self.hash, device=self.device, inode=self.inode,
             mtime=self.mtime_nsec, size=self.size, path=self.path,
         )?)
     }
@@ -62,7 +57,7 @@ impl MetadataItem {
             _ => None,
         }).ok_or_else(error)?;
 
-        let checksum = parts.next().ok_or_else(error)?.to_owned();
+        let hash = parts.next().ok_or_else(error)?.as_bytes().into();
         let (device, inode, mtime_nsec) = parts.next().and_then(|fingerprint: &str| {
             let mut parts = fingerprint.split(':');
 
@@ -80,7 +75,7 @@ impl MetadataItem {
         let path = parts.next().ok_or_else(error)?.to_owned();
 
         Ok(MetadataItem {
-            path, unique, checksum,
+            path, hash, unique,
             device, inode, mtime_nsec,
             size,
         })

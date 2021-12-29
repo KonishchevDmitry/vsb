@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use log::{warn, error};
 
 use crate::core::GenericResult;
+use crate::hash::Hash;
 use crate::metadata::MetadataReader;
 use crate::provider::{ReadProvider, FileType};
 
@@ -85,7 +86,7 @@ impl Backup {
     }
 
     pub fn inspect(
-        &mut self, provider: &dyn ReadProvider, available_checksums: &mut HashSet<String>,
+        &mut self, provider: &dyn ReadProvider, available_hashes: &mut HashSet<Hash>,
     ) -> GenericResult<bool> {
         let metadata_path = self.metadata_path.as_ref().ok_or(
             "The backup has no metadata file")?;
@@ -112,12 +113,12 @@ impl Backup {
             if file.unique {
                 stat.unique_files += 1;
                 stat.unique_size += file.size;
-                available_checksums.insert(file.checksum);
+                available_hashes.insert(file.hash);
             } else {
                 stat.extern_files += 1;
                 stat.extern_size += file.size;
 
-                if !available_checksums.contains(&file.checksum) {
+                if !available_hashes.contains(&file.hash) {
                     error!(concat!(
                         "{:?} backup on {} is not recoverable: ",
                         "unable to find extern {:?} file in the backup group."

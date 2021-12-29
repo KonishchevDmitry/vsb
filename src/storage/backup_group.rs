@@ -117,10 +117,10 @@ impl BackupGroup {
 
     pub fn inspect(&mut self, provider: &dyn ReadProvider) -> bool {
         let mut ok = true;
-        let mut available_checksums = HashSet::new();
+        let mut available_hashes = HashSet::new();
 
         for backup in &mut self.backups {
-            match backup.inspect(provider, &mut available_checksums) {
+            match backup.inspect(provider, &mut available_hashes) {
                 Ok(recoverable) => ok &= recoverable,
                 Err(err) => {
                     error!("{:?} backup on {} validation error: {}.",

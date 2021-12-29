@@ -263,7 +263,7 @@ impl WriteProvider for Dropbox {
                             },
                         }, "")?;
 
-                    if finish_response.content_hash != checksum {
+                    if finish_response.content_hash != checksum.to_string() {
                         if let Err(err) = self.delete(&temp_path) {
                             error!("Failed to delete a temporary {:?} file from {}: {}.",
                                    temp_path, self.name(), err);

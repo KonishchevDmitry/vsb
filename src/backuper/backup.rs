@@ -12,6 +12,8 @@ use crate::core::{EmptyResult, GenericResult};
 use crate::metadata::{MetadataItem, MetadataWriter};
 use crate::storage::{Storage, Backup};
 
+use super::file_reader::FileReader;
+
 pub struct BackupFile {
     // storage: Storage, // FIXME(konishchev): Ref counter
     #[allow(dead_code)] // FIXME(konishchev): Drop
@@ -47,11 +49,14 @@ impl BackupFile {
     }
 
     // FIXME(konishchev): Handle file truncation properly
-    pub fn add_file(&mut self, path: &Path, fs_metadata: &fs::Metadata, file: File) -> EmptyResult {
-        let mut header = tar_header(fs_metadata);
-        self.data.append_data(&mut header, tar_path(path)?, file)?;
+    pub fn add_file(&mut self, path: &Path, fs_metadata: &fs::Metadata, mut file: File) -> EmptyResult {
+        let mut file_reader = FileReader::new(&mut file, fs_metadata.len());
 
-        let metadata = MetadataItem::new(path, fs_metadata, true)?;
+        let mut header = tar_header(fs_metadata);
+        self.data.append_data(&mut header, tar_path(path)?, &mut file_reader)?;
+        let (bytes_read, hash) = file_reader.consume();
+
+        let metadata = MetadataItem::new(path, fs_metadata, bytes_read, hash, true)?;
         self.metadata.write(&metadata)?;
 
         Ok(())

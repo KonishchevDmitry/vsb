@@ -1,9 +1,34 @@
+use std::fmt::{self, Display, Debug, LowerHex, Formatter};
 use std::io::{self, Write};
 
 use digest::Digest;
 
+#[derive(PartialEq, Eq, Hash)]
+pub struct Hash(Vec<u8>);
+
+impl From<&[u8]> for Hash {
+    fn from(hash: &[u8]) -> Self {
+        Hash(hash.to_vec())
+    }
+}
+
+impl Display for Hash {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for byte in &self.0 {
+            LowerHex::fmt(byte, f)?;
+        }
+        Ok(())
+    }
+}
+
+impl Debug for Hash {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
 pub trait Hasher: Write + Send {
-    fn finish(self: Box<Self>) -> String;
+    fn finish(self: Box<Self>) -> Hash;
 }
 
 pub struct ChunkedSha256 {
@@ -69,9 +94,9 @@ impl Write for ChunkedSha256 {
 }
 
 impl Hasher for ChunkedSha256 {
-    fn finish(mut self: Box<Self>) -> String {
+    fn finish(mut self: Box<Self>) -> Hash {
         self.consume_block();
-        format!("{:x}", self.result_hasher.finalize())
+        self.result_hasher.finalize().as_slice().into()
     }
 }
 
@@ -101,7 +126,7 @@ impl Write for Md5 {
 }
 
 impl Hasher for Md5 {
-    fn finish(self: Box<Self>) -> String {
-        format!("{:x}", self.hasher.finalize())
+    fn finish(self: Box<Self>) -> Hash {
+        self.hasher.finalize().as_slice().into()
     }
 }

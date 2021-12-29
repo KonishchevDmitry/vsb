@@ -6,11 +6,12 @@ use std::thread::JoinHandle;
 use bytes::Bytes;
 
 use crate::core::{EmptyResult, GenericResult};
+use crate::hash::Hash;
 use crate::util;
 
 pub enum Data {
     Payload(Bytes),
-    EofWithChecksum(String),
+    EofWithChecksum(Hash),
 }
 
 pub type DataSender = mpsc::SyncSender<Result<Data, String>>;
@@ -18,7 +19,7 @@ pub type DataReceiver = mpsc::Receiver<Result<Data, String>>;
 
 pub enum ChunkStream {
     Stream(u64, ChunkReceiver),
-    EofWithCheckSum(u64, String),
+    EofWithCheckSum(u64, Hash),
 }
 
 pub type ChunkStreamSender = mpsc::SyncSender<Result<ChunkStream, String>>;
