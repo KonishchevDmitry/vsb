@@ -3,7 +3,7 @@
 
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
-mod backuper;
+mod backuping;
 mod check;
 mod cli;
 mod config;
@@ -60,7 +60,7 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
         "Error while reading {:?} configuration file: {}", config_path, e))?;
 
     match parser.parse()? {
-        Action::Backup {name} => backuper::backup(config.get_backup(&name)?),
+        Action::Backup {name} => backuping::backup(config.get_backup(&name)?),
         Action::Upload => uploader::upload(&config),
     }
 }

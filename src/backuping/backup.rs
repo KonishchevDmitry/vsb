@@ -14,7 +14,7 @@ use crate::storage::{Storage, Backup};
 
 use super::file_reader::FileReader;
 
-pub struct BackupFile {
+pub struct BackupInstance {
     path: PathBuf,
     temp_path: PathBuf,
 
@@ -26,8 +26,8 @@ pub struct BackupFile {
 
 // FIXME(konishchev): Cleanup on error
 // FIXME(konishchev): Mark broken on error
-impl BackupFile {
-    pub fn create(config: &BackupConfig, storage: Storage) -> GenericResult<BackupFile> {
+impl BackupInstance {
+    pub fn create(config: &BackupConfig, storage: Storage) -> GenericResult<BackupInstance> {
         let (group, backup) = storage.create_backup(config.max_backups)?;
 
         // FIXME(konishchev): Load metadata
@@ -42,7 +42,7 @@ impl BackupFile {
         let data_writer: Box<dyn Write> = Box::new(BzEncoder::new(data_file, Compression::best()));
         let data = tar::Builder::new(data_writer);
 
-        Ok(BackupFile {
+        Ok(BackupInstance {
             // FIXME(konishchev): Rewrite
             path: storage.get_backup_path(&group.name, &backup.name, false).into(),
             temp_path: storage.get_backup_path(&group.name, &backup.name, true).into(),

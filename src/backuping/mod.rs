@@ -1,6 +1,3 @@
-// FIXME(konishchev): Drop
-#![allow(clippy::module_inception)]
-
 mod backup;
 mod backuper;
 mod file_reader;
@@ -10,13 +7,13 @@ use crate::core::GenericResult;
 use crate::providers::filesystem::Filesystem;
 use crate::storage::Storage;
 
-use self::backup::BackupFile;
+use self::backup::BackupInstance;
 use self::backuper::Backuper;
 
 // FIXME(konishchev): Implement
 pub fn backup(backup_config: &BackupConfig) -> GenericResult<bool> {
     let storage = Storage::new(Filesystem::new(), &backup_config.path);
-    let backup = BackupFile::create(backup_config, storage)?;
+    let backup = BackupInstance::create(backup_config, storage)?;
 
     let backuper = Backuper::new(backup_config, backup, false)?;
     Ok(backuper.run().is_ok())
@@ -57,7 +54,7 @@ mod test {
 
         let filesystem = Filesystem::new();
         let storage = Storage::new(Filesystem::new(), backup_root_path.to_str().unwrap());
-        let backup = BackupFile::create(&backup_config, storage)?;
+        let backup = BackupInstance::create(&backup_config, storage)?;
         let backuper = Backuper::new(&backup_config, backup, true)?;
         assert!(backuper.run().is_ok());
 
