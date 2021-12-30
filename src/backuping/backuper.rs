@@ -4,7 +4,7 @@ use std::io::{self, ErrorKind};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
-use log::{info, warn, error};
+use log::{debug, warn, error};
 use nix::fcntl::OFlag;
 
 use crate::backuping::backup::BackupInstance;
@@ -43,7 +43,7 @@ impl Backuper {
     }
 
     fn backup_path(&mut self, path: &Path, top_level: bool) -> EmptyResult {
-        info!("Backing up {:?}...", path);
+        debug!("Backing up {:?}...", path);
 
         if let Err(err) = crate::metadata::validate_path(path) {
             self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));

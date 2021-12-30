@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Read, BufRead, BufReader, Lines, Write, BufWriter};
+use std::io::{self, Read, BufRead, BufReader, Lines, Write, BufWriter};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -111,20 +111,22 @@ impl Iterator for MetadataReader {
     }
 }
 
-// FIXME(konishchev): flush + fsync
-pub struct MetadataWriter {
-    writer: Box<dyn Write>,
+pub struct MetadataWriter<W: Write> {
+    writer: BufWriter<BzEncoder<W>>,
 }
 
-impl MetadataWriter {
-    pub fn new<W: Write + 'static>(writer: W) -> MetadataWriter {
-        let writer = BzEncoder::new(writer, Compression::best());
+impl<W: Write> MetadataWriter<W> {
+    pub fn new(writer: W) -> MetadataWriter<W> {
         MetadataWriter {
-            writer: Box::new(BufWriter::new(writer))
+            writer: BufWriter::new(BzEncoder::new(writer, Compression::best()))
         }
     }
 
     pub fn write(&mut self, item: &MetadataItem) -> EmptyResult {
         item.encode(&mut self.writer)
+    }
+
+    pub fn finish(self) -> io::Result<W> {
+        self.writer.into_inner()?.finish()
     }
 }

@@ -54,11 +54,10 @@ mod test {
 
         let filesystem = Filesystem::new();
         let storage = Storage::new(Filesystem::new(), backup_root_path.to_str().unwrap());
-        let backup = BackupInstance::create(&backup_config, storage)?;
+        let backup = BackupInstance::create(&backup_config, storage.clone())?;
         let backuper = Backuper::new(&backup_config, backup, true)?;
         assert!(backuper.run().is_ok());
 
-        let storage = Storage::new(Filesystem::new(), backup_root_path.to_str().unwrap());
         let (groups, ok) = storage.get_backup_groups(true)?;
         assert!(ok);
         assert_eq!(groups.len(), 1);

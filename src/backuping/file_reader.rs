@@ -83,7 +83,7 @@ mod tests {
         let test = |file_mock: &[u8], file_size: usize| {
             let expected_hash: Hash = Sha512::digest(file_mock).as_slice().into();
 
-            let mut result_data: Vec<u8> = Vec::new();
+            let mut result_data: Vec<u8> = Vec::with_capacity(file_size);
             let expected_data: Vec<u8> = file_mock.iter().cloned()
                 .chain(std::iter::repeat(0).take(file_size - file_mock.len())).collect();
 

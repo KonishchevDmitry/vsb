@@ -163,7 +163,7 @@ impl Storage {
     }
 
     pub fn get_backup_path(&self, group_name: &str, backup_name: &str, temporary: bool) -> String {
-        self.get_backup_group_path(group_name)+ "/" + &self.get_backup_file_name(backup_name, temporary)
+        self.get_backup_group_path(group_name) + "/" + &self.get_backup_file_name(backup_name, temporary)
     }
 
     fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {

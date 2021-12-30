@@ -1,12 +1,23 @@
+use std::io;
+use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 use std::thread;
 use std::time::{self, Duration};
 
 use libc::pid_t;
 use log::{debug, error};
 use nix::errno::Errno;
+use nix::fcntl::OFlag;
 use nix::{sys, unistd};
 
 use crate::core::{EmptyResult, GenericResult};
+
+pub fn fsync_directory(path: &Path) -> io::Result<()> {
+    let mut open_options = OpenOptions::new();
+    open_options.read(true).custom_flags(OFlag::O_NOFOLLOW.bits());
+    open_options.open(path)?.sync_all()
+}
 
 pub fn spawn_thread<F, T>(name: &str, f: F) -> GenericResult<thread::JoinHandle<T>>
     where F: FnOnce() -> T, F: Send + 'static, T: Send + 'static

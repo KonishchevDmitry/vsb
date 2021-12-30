@@ -15,6 +15,7 @@ mod metrics;
 mod oauth;
 mod provider;
 mod providers;
+mod restoring;
 mod storage;
 mod stream_splitter;
 mod sync;
