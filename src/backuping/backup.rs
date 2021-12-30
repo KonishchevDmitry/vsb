@@ -10,7 +10,7 @@ use tar::Header;
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
 use crate::metadata::{MetadataItem, MetadataWriter};
-use crate::storage::{Storage, Backup};
+use crate::storage::{StorageRc, Backup};
 
 use super::file_reader::FileReader;
 
@@ -27,7 +27,7 @@ pub struct BackupInstance {
 // FIXME(konishchev): Cleanup on error
 // FIXME(konishchev): Mark broken on error
 impl BackupInstance {
-    pub fn create(config: &BackupConfig, storage: Storage) -> GenericResult<BackupInstance> {
+    pub fn create(config: &BackupConfig, storage: StorageRc) -> GenericResult<BackupInstance> {
         let (group, backup) = storage.create_backup(config.max_backups)?;
 
         // FIXME(konishchev): Load metadata

@@ -69,7 +69,7 @@ fn sync_backups(backup_config: &BackupConfig) -> EmptyResult {
         error!("Failed to collect metrics: {}.", err);
     }
 
-    let mut cloud_storage = match upload_config.provider {
+    let cloud_storage = match upload_config.provider {
         ProviderConfig::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
             Storage::new(Dropbox::new(client_id, client_secret, refresh_token)?, &upload_config.dst),
         ProviderConfig::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
@@ -80,7 +80,7 @@ fn sync_backups(backup_config: &BackupConfig) -> EmptyResult {
     info!("Syncing...");
     let sync_ok = sync::sync_backups(
         &local_storage, &local_backup_groups,
-        &mut cloud_storage, &cloud_backup_groups, local_ok && cloud_ok,
+        &cloud_storage, &cloud_backup_groups, local_ok && cloud_ok,
         upload_config.max_backup_groups, &upload_config.encryption_passphrase);
 
     let (cloud_backup_groups, cloud_ok) = match get_backup_groups(&cloud_storage, false) {

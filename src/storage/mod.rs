@@ -3,6 +3,7 @@ mod backup;
 mod backup_group;
 mod helpers;
 
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use chrono::{self, offset::Local, TimeZone};
@@ -21,24 +22,26 @@ use self::helpers::BackupFileTraits;
 pub use self::backup::Backup;
 pub use self::backup_group::BackupGroup;
 
+pub type StorageRc = Rc<Storage>;
+
 pub struct Storage {
     provider: Box<dyn AbstractProvider>,
     path: String,
 }
 
 impl Storage {
-    pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> Storage {
-        Storage {
+    pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> StorageRc {
+        Rc::new(Storage {
             provider: ReadWriteProviderAdapter::new(provider),
             path: path.to_owned(),
-        }
+        })
     }
 
-    pub fn new_read_only<T: ReadProvider +'static>(provider: T, path: &str) -> Storage {
-        Storage {
+    pub fn new_read_only<T: ReadProvider + 'static>(provider: T, path: &str) -> StorageRc {
+        Rc::new(Storage {
             provider: ReadOnlyProviderAdapter::new(provider),
             path: path.to_owned(),
-        }
+        })
     }
 
     pub fn name(&self) -> &str {

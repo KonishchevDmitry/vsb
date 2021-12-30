@@ -6,7 +6,7 @@ use crate::core::EmptyResult;
 use crate::storage::{Storage, BackupGroup};
 
 pub fn sync_backups(local_storage: &Storage, local_groups: &[BackupGroup],
-                    cloud_storage: &mut Storage, cloud_groups: &[BackupGroup],
+                    cloud_storage: &Storage, cloud_groups: &[BackupGroup],
                     mut ok: bool, max_backup_groups: usize, encryption_passphrase: &str) -> bool {
     if cfg!(debug_assertions) {
         error!("Attention! Running in develop mode.");
