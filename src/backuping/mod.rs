@@ -13,10 +13,10 @@ use self::backuper::Backuper;
 // FIXME(konishchev): Implement
 pub fn backup(backup_config: &BackupConfig) -> GenericResult<bool> {
     let storage = Storage::new(Filesystem::new(), &backup_config.path);
-    let backup = BackupInstance::create(backup_config, storage)?;
+    let (backup, ok) = BackupInstance::create(backup_config, storage)?;
 
     let backuper = Backuper::new(backup_config, backup, false)?;
-    Ok(backuper.run().is_ok())
+    Ok(ok && backuper.run().is_ok())
 }
 
 #[cfg(test)]
@@ -54,7 +54,8 @@ mod test {
 
         let filesystem = Filesystem::new();
         let storage = Storage::new(Filesystem::new(), backup_root_path.to_str().unwrap());
-        let backup = BackupInstance::create(&backup_config, storage.clone())?;
+        let (backup, ok) = BackupInstance::create(&backup_config, storage.clone())?;
+        assert!(ok);
         let backuper = Backuper::new(&backup_config, backup, true)?;
         assert!(backuper.run().is_ok());
 

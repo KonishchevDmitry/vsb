@@ -3,7 +3,7 @@ use std::io::{self, Write};
 
 use digest::Digest;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Hash(Vec<u8>);
 
 impl From<&[u8]> for Hash {

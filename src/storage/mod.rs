@@ -25,7 +25,7 @@ pub use self::backup_group::BackupGroup;
 pub type StorageRc = Rc<Storage>;
 
 pub struct Storage {
-    provider: Box<dyn AbstractProvider>,
+    pub provider: Box<dyn AbstractProvider>,
     path: String,
 }
 

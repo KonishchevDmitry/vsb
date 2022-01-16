@@ -15,10 +15,7 @@ pub struct MetadataItem {
     pub size: u64,
     pub hash: Hash,
     pub unique: bool,
-
-    device: u64,
-    inode: u64,
-    mtime_nsec: i128,
+    pub fingerprint: Fingerprint,
 }
 
 impl MetadataItem {
@@ -27,10 +24,11 @@ impl MetadataItem {
 
         Ok(MetadataItem {
             path, size, hash, unique,
-
-            device: metadata.dev(),
-            inode: metadata.ino(),
-            mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
+            fingerprint: Fingerprint {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
+            },
         })
     }
 
@@ -41,9 +39,9 @@ impl MetadataItem {
         };
 
         Ok(writeln!(
-            writer, "{status} {hash} {device}:{inode}:{mtime} {size} {path}",
-            status=status, hash=self.hash, device=self.device, inode=self.inode,
-            mtime=self.mtime_nsec, size=self.size, path=self.path,
+            writer, "{status} {hash} {fingerprint} {size} {path}",
+            status=status, hash=self.hash, fingerprint=self.fingerprint.encode(), size=self.size,
+            path=self.path,
         )?)
     }
 
@@ -58,27 +56,42 @@ impl MetadataItem {
         }).ok_or_else(error)?;
 
         let hash = parts.next().ok_or_else(error)?.as_bytes().into();
-        let (device, inode, mtime_nsec) = parts.next().and_then(|fingerprint: &str| {
-            let mut parts = fingerprint.split(':');
-
-            let device = parts.next().and_then(|v| v.parse::<u64>().ok());
-            let inode = parts.next().and_then(|v| v.parse::<u64>().ok());
-            let mtime = parts.next().and_then(|v| v.parse::<i128>().ok());
-
-            match (device, inode, mtime, parts.next()) {
-                (Some(device), Some(inode), Some(mtime), None) => Some((device, inode, mtime)),
-                _ => None,
-            }
-        }).ok_or_else(error)?;
+        let fingerprint = parts.next().and_then(Fingerprint::decode).ok_or_else(error)?;
 
         let size = parts.next().and_then(|v| v.parse::<u64>().ok()).ok_or_else(error)?;
         let path = parts.next().ok_or_else(error)?.to_owned();
 
-        Ok(MetadataItem {
-            path, hash, unique,
-            device, inode, mtime_nsec,
-            size,
-        })
+        Ok(MetadataItem {path, size, hash, unique, fingerprint})
+    }
+}
+
+pub struct Fingerprint {
+    device: u64,
+    inode: u64,
+    mtime_nsec: i128,
+}
+
+impl Fingerprint {
+    fn encode(&self) -> String {
+        format!(
+            "{device}:{inode}:{mtime}",
+            device=self.device, inode=self.inode, mtime=self.mtime_nsec
+        )
+    }
+
+    fn decode(fingerprint: &str) -> Option<Fingerprint> {
+        let mut parts = fingerprint.split(':');
+
+        let device = parts.next().and_then(|v| v.parse::<u64>().ok());
+        let inode = parts.next().and_then(|v| v.parse::<u64>().ok());
+        let mtime_nsec = parts.next().and_then(|v| v.parse::<i128>().ok());
+
+        match (device, inode, mtime_nsec, parts.next()) {
+            (Some(device), Some(inode), Some(mtime_nsec), None) => Some(Fingerprint {
+                device, inode, mtime_nsec,
+            }),
+            _ => None,
+        }
     }
 }
 

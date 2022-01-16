@@ -3,7 +3,7 @@ use crate::provider::{ReadProvider, WriteProvider};
 
 // Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
 // to emulate it via this trait.
-pub trait AbstractProvider {
+pub trait AbstractProvider: Sync + Send {
     fn read(&self) -> &dyn ReadProvider;
     fn write(&self) -> GenericResult<&dyn WriteProvider>;
 }
