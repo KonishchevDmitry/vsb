@@ -19,17 +19,9 @@ pub struct MetadataItem {
 }
 
 impl MetadataItem {
-    pub fn new(path: &Path, metadata: &fs::Metadata, size: u64, hash: Hash, unique: bool) -> GenericResult<MetadataItem> {
+    pub fn new(path: &Path, size: u64, hash: Hash, fingerprint: Fingerprint, unique: bool) -> GenericResult<MetadataItem> {
         let path = validate_path(path)?.to_owned();
-
-        Ok(MetadataItem {
-            path, size, hash, unique,
-            fingerprint: Fingerprint {
-                device: metadata.dev(),
-                inode: metadata.ino(),
-                mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
-            },
-        })
+        Ok(MetadataItem {path, size, hash, unique, fingerprint})
     }
 
     fn encode(&self, writer: &mut dyn Write) -> EmptyResult {
@@ -65,6 +57,7 @@ impl MetadataItem {
     }
 }
 
+#[derive(PartialEq)]
 pub struct Fingerprint {
     device: u64,
     inode: u64,
@@ -72,6 +65,14 @@ pub struct Fingerprint {
 }
 
 impl Fingerprint {
+    pub fn new(metadata: &fs::Metadata) -> Fingerprint {
+        Fingerprint {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            mtime_nsec: metadata.mtime() as i128 * 1_000_000_000 + metadata.mtime_nsec() as i128,
+        }
+    }
+
     fn encode(&self) -> String {
         format!(
             "{device}:{inode}:{mtime}",

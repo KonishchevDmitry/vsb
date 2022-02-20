@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, BufWriter};
+use std::io::{self, SeekFrom, BufWriter, Seek};
 use std::path::{Path, PathBuf, Component};
 
 use bzip2::Compression;
 use bzip2::write::BzEncoder;
-use log::{debug, error};
+use log::{debug, error, warn};
 use rayon::prelude::*;
 use tar::Header;
 
@@ -18,15 +18,17 @@ use crate::util;
 
 use super::file_reader::FileReader;
 
+type Archive = tar::Builder<BufWriter<BzEncoder<File>>>;
+
 pub struct BackupInstance {
     path: PathBuf,
     temp_path: Option<PathBuf>,
 
     metadata: Option<MetadataWriter<File>>,
-    data: Option<tar::Builder<BufWriter<BzEncoder<File>>>>,
+    data: Option<Archive>,
 
     extern_hashes: HashSet<Hash>,
-    last_state: Option<HashMap<String, FileState>>
+    last_state: Option<HashMap<PathBuf, FileState>>
 }
 
 impl BackupInstance {
@@ -69,17 +71,39 @@ impl BackupInstance {
 
     pub fn add_directory(&mut self, path: &Path, metadata: &fs::Metadata) -> EmptyResult {
         let mut header = tar_header(metadata);
-        Ok(self.data.as_mut().unwrap().append_data(&mut header, tar_path(path)?, io::empty())?)
+        Ok(self.data().append_data(&mut header, tar_path(path)?, io::empty())?)
     }
 
     pub fn add_file(&mut self, path: &Path, fs_metadata: &fs::Metadata, mut file: File) -> EmptyResult {
-        let mut file_reader = FileReader::new(&mut file, fs_metadata.len());
-
+        let archive_path = tar_path(path)?;
         let mut header = tar_header(fs_metadata);
-        self.data.as_mut().unwrap().append_data(&mut header, tar_path(path)?, &mut file_reader)?;
-        let (bytes_read, hash) = file_reader.consume();
 
-        let metadata = MetadataItem::new(path, fs_metadata, bytes_read, hash, true)?;
+        let fingerprint = Fingerprint::new(fs_metadata);
+        let size = fs_metadata.len();
+
+        if size == 0 {
+            self.data().append_data(&mut header, archive_path, io::empty())?;
+            return Ok(());
+        }
+
+        let (hash, size, unique) = if let Some((hash, size)) = self.deduplicate(path, &mut file, &fingerprint, size)? {
+            header.set_size(0);
+            self.data().append_data(&mut header, archive_path, io::empty())?;
+            (hash, size, false)
+        } else {
+            let mut file_reader = FileReader::new(&mut file, size);
+            self.data().append_data(&mut header, archive_path, &mut file_reader)?;
+
+            let (bytes_read, hash) = file_reader.consume();
+            if bytes_read != size {
+                warn!("{:?} has been truncated during backup.", path);
+            }
+
+            self.extern_hashes.insert(hash.clone());
+            (hash, bytes_read, true)
+        };
+
+        let metadata = MetadataItem::new(path, size, hash, fingerprint, unique)?;
         self.metadata.as_mut().unwrap().write(&metadata)?;
 
         Ok(())
@@ -87,7 +111,7 @@ impl BackupInstance {
 
     pub fn add_symlink(&mut self, path: &Path, metadata: &fs::Metadata, target: &Path) -> EmptyResult {
         let mut header = tar_header(metadata);
-        Ok(self.data.as_mut().unwrap().append_link(&mut header, tar_path(path)?, target)?)
+        Ok(self.data().append_link(&mut header, tar_path(path)?, target)?)
     }
 
     pub fn finish(mut self) -> EmptyResult {
@@ -107,6 +131,33 @@ impl BackupInstance {
         util::fsync_directory(parent_path)?;
 
         Ok(())
+    }
+
+    fn deduplicate(
+        &mut self, path: &Path, file: &mut File, fingerprint: &Fingerprint, size: u64,
+    ) -> GenericResult<Option<(Hash, u64)>> {
+        if let Some(last_state) = self.last_state.as_ref().and_then(|states| states.get(path)) {
+            if *fingerprint == last_state.fingerprint {
+                debug!("{:?} hasn't been changed.", path);
+                return Ok(Some((last_state.hash.clone(), size)));
+            }
+        }
+
+        let mut file_reader = FileReader::new(file, size);
+        io::copy(&mut file_reader, &mut io::sink())?;
+        let (bytes_read, hash) = file_reader.consume();
+        file.seek(SeekFrom::Start(0))?;
+
+        if self.extern_hashes.contains(&hash) {
+            debug!("Deduplicate {:?} by its hash.", path);
+            return Ok(Some((hash, bytes_read)))
+        }
+
+        Ok(None)
+    }
+
+    fn data(&mut self) -> &mut Archive {
+        self.data.as_mut().unwrap()
     }
 }
 
@@ -137,7 +188,7 @@ struct FileState {
 }
 
 fn load_backups_metadata(storage: &Storage, group: &BackupGroup) -> (
-    HashSet<Hash>, Option<HashMap<String, FileState>>, bool,
+    HashSet<Hash>, Option<HashMap<PathBuf, FileState>>, bool,
 ) {
     let backups = &group.backups;
     let results = backups.par_iter().enumerate().map(|(index, backup): (usize, &Backup)| {
@@ -152,7 +203,7 @@ fn load_backups_metadata(storage: &Storage, group: &BackupGroup) -> (
             let file = file?;
 
             if let Some(last_state) = last_state.as_mut() {
-                last_state.insert(file.path, FileState {
+                last_state.insert(file.path.into(), FileState {
                     fingerprint: file.fingerprint,
                     hash: file.hash.clone(),
                 });
