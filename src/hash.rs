@@ -3,6 +3,8 @@ use std::io::{self, Write};
 
 use digest::Digest;
 
+use crate::core::{GenericResult, GenericError};
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Hash(Vec<u8>);
 
@@ -12,18 +14,17 @@ impl From<&[u8]> for Hash {
     }
 }
 
+impl TryFrom<&str> for Hash {
+    type Error = GenericError;
+
+    fn try_from(hash: &str) -> GenericResult<Hash> {
+        Ok(Hash(hex::decode(hash).map_err(|_| format!("Invalid hash: {:?}", hash))?))
+    }
+}
+
 impl Display for Hash {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        static CHARS: &[u8; 16] = b"0123456789abcdef";
-
-        let mut data = Vec::with_capacity(self.0.len() * 2);
-        for &byte in &self.0 {
-            data.push(CHARS[(byte >> 4) as usize]);
-            data.push(CHARS[(byte & 0xF) as usize]);
-        }
-
-        let string = std::str::from_utf8(data.as_slice()).unwrap();
-        Display::fmt(string, f)
+        Display::fmt(&hex::encode(&self.0), f)
     }
 }
 

@@ -19,6 +19,7 @@ mod restoring;
 mod storage;
 mod stream_splitter;
 mod sync;
+#[cfg(test)] mod tests;
 mod uploader;
 mod util;
 

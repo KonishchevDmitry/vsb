@@ -47,7 +47,7 @@ impl MetadataItem {
             _ => None,
         }).ok_or_else(error)?;
 
-        let hash = parts.next().ok_or_else(error)?.as_bytes().into();
+        let hash = parts.next().ok_or_else(error)?.try_into()?;
         let fingerprint = parts.next().and_then(Fingerprint::decode).ok_or_else(error)?;
 
         let size = parts.next().and_then(|v| v.parse::<u64>().ok()).ok_or_else(error)?;
@@ -57,7 +57,7 @@ impl MetadataItem {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Fingerprint {
     device: u64,
     inode: u64,
