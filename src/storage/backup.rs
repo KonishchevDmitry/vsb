@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{Read, BufReader};
+use std::sync::Arc;
 
+use bzip2::read::BzDecoder;
 use log::error;
+use tar::Archive;
 
 use crate::core::GenericResult;
 use crate::hash::Hash;
@@ -95,6 +99,14 @@ impl Backup {
             "Unable to open metadata file: {}", e))?;
 
         Ok(MetadataReader::new(file))
+    }
+
+    // FIXME(konishchev): Rewrite
+    pub fn read_data(&self, provider: &dyn ReadProvider) -> GenericResult<Archive<Box<dyn Read>>> {
+        let path = self.path.clone() + "/" + Backup::DATA_NAME;
+        let file = provider.open_file(&path)?;
+        let reader = Box::new(BufReader::new(BzDecoder::new(file)));
+        Ok(Archive::new(reader))
     }
 
     pub fn inspect(

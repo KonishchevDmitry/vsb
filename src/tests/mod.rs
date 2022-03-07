@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use assert_fs::fixture::TempDir;
 use digest::Digest;
@@ -13,7 +14,8 @@ use crate::core::{GenericResult, EmptyResult};
 use crate::hash::Hash;
 use crate::metadata::{Fingerprint, MetadataItem};
 use crate::providers::filesystem::Filesystem;
-use crate::storage::{Backup, Storage};
+use crate::restoring::Restorer;
+use crate::storage::{Backup, BackupGroup, Storage};
 
 // FIXME(konishchev): Rewrite
 #[test]
@@ -86,6 +88,24 @@ fn backup() -> EmptyResult {
             assert_eq!(file.hash, hash, "Invalid {:?} hash", path);
         }
     }
+
+    let (groups, ok) = storage.get_backup_groups(true)?;
+    assert!(ok);
+
+    let group = groups.first().unwrap();
+
+    let restore_path = temp_dir.join("restore");
+    let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
+    let restorer = Restorer::new(storage.clone())?;
+    restorer.restore(&group.name, &group.backups.first().unwrap().name, &restore_path)?;
+
+    println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
+    // Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
+    // Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
+    fs::write(&mutable_file_path, "pass-0")?;
+    Command::new("git").args([
+        "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
+    ]).status()?.exit_ok()?;
 
     Ok(())
 }

@@ -1593,6 +1593,7 @@ dependencies = [
  "digest",
  "easy-logging",
  "hex",
+ "itertools",
  "lazy_static",
  "libc",
  "log",

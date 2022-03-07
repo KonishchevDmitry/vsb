@@ -1,4 +1,5 @@
 // FIXME(konishchev): Drop
+#![feature(exit_status_error)]
 #![feature(io_error_more)]
 
 // FIXME(konishchev): Refactor modules

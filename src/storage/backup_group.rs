@@ -62,7 +62,8 @@ impl BackupGroup {
         Ok((backup_groups, ok))
     }
 
-    fn read(provider: &dyn ReadProvider, name: &str, path: &str) -> GenericResult<(BackupGroup, bool)> {
+    // FIXME(konishchev): Make private?
+    pub fn read(provider: &dyn ReadProvider, name: &str, path: &str) -> GenericResult<(BackupGroup, bool)> {
         let mut ok = true;
         let mut first = true;
 
