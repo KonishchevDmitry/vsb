@@ -15,7 +15,11 @@ pub struct BackupGroup {
 }
 
 impl BackupGroup {
-    pub const NAME_FORMAT: &'static str = "%Y.%m.%d";
+    #[cfg(not(test))] pub const NAME_FORMAT: &'static str = "%Y.%m.%d";
+    #[cfg(test)] pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S.%3f";
+
+    #[cfg(not(test))] const NAME_REGEX: &'static str = r"^\d{4}\.\d{2}\.\d{2}$";
+    #[cfg(test)] const NAME_REGEX: &'static str = r"^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2}\.\d{3}$";
 
     pub fn new(name: &str) -> BackupGroup {
         BackupGroup {
@@ -27,7 +31,7 @@ impl BackupGroup {
     pub fn list(provider: &dyn ReadProvider, path: &str) -> GenericResult<(Vec<BackupGroup>, bool)> {
         let mut ok = true;
         let mut backup_groups = Vec::new();
-        let name_regex = Regex::new(r"^\d{4}\.\d{2}\.\d{2}$")?;
+        let name_regex = Regex::new(BackupGroup::NAME_REGEX)?;
 
         let mut files = provider.list_directory(path)?.ok_or_else(|| format!(
             "{:?} backup root doesn't exist", path))?;
@@ -88,7 +92,7 @@ impl BackupGroup {
             if first {
                 first = false;
 
-                if backup_name.split('-').next().unwrap() != group.name {
+                if cfg!(not(test)) && backup_name.split('-').next().unwrap() != group.name {
                     error!(concat!(
                         "Suspicious first backup {:?} in {:?} group on {}: ",
                         "possibly corrupted backup group."

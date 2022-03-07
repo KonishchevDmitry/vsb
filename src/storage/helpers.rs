@@ -32,8 +32,8 @@ impl BackupFileTraits {
     }
 
     fn get_name_re(extension: &str) -> Regex {
-        let regex = r"^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})".to_owned()
-            + &regex::escape(extension) + "$";
-        Regex::new(&regex).unwrap()
+        #[cfg(not(test))] let base = r"\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2}";
+        #[cfg(test)] let base = r"\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2}\.\d{3}";
+        Regex::new(&format!("^({}){}$", base, regex::escape(extension))).unwrap()
     }
 }

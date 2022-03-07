@@ -100,6 +100,7 @@ impl Storage {
             },
         };
 
+        // FIXME(konishchev): Check existence?
         let backup_name = now.format(Backup::NAME_FORMAT).to_string();
         let backup_path = self.get_backup_path(&group.name, &backup_name, true);
         let backup = Backup::new(&backup_path, &backup_name);
