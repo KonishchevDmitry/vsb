@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use log::error;
 use regex::{self, Regex};
 
-use crate::core::GenericResult;
+use crate::core::{EmptyResult, GenericResult};
 use crate::provider::{ReadProvider, FileType};
 
 use super::backup::Backup;
-use super::helpers::BackupFileTraits;
+use super::traits::BackupTraits;
 
 pub struct BackupGroup {
     pub name: String,
@@ -15,12 +15,6 @@ pub struct BackupGroup {
 }
 
 impl BackupGroup {
-    #[cfg(not(test))] pub const NAME_FORMAT: &'static str = "%Y.%m.%d";
-    #[cfg(test)] pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S.%3f";
-
-    #[cfg(not(test))] const NAME_REGEX: &'static str = r"^\d{4}\.\d{2}\.\d{2}$";
-    #[cfg(test)] const NAME_REGEX: &'static str = r"^\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2}\.\d{3}$";
-
     pub fn new(name: &str) -> BackupGroup {
         BackupGroup {
             name: name.to_owned(),
@@ -29,9 +23,10 @@ impl BackupGroup {
     }
 
     pub fn list(provider: &dyn ReadProvider, path: &str) -> GenericResult<(Vec<BackupGroup>, bool)> {
+        let backup_traits = BackupTraits::get_for(provider.type_());
+
         let mut ok = true;
         let mut backup_groups = Vec::new();
-        let name_regex = Regex::new(BackupGroup::NAME_REGEX)?;
 
         let mut files = provider.list_directory(path)?.ok_or_else(|| format!(
             "{:?} backup root doesn't exist", path))?;
@@ -42,7 +37,7 @@ impl BackupGroup {
                 continue
             }
 
-            if file.type_ != FileType::Directory || !name_regex.is_match(&file.name) {
+            if file.type_ != FileType::Directory || !backup_traits.group_name_regex.is_match(&file.name) {
                 error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
                        path, provider.name(), file.type_, file.name);
                 ok = false;
@@ -52,7 +47,7 @@ impl BackupGroup {
             let group_name = &file.name;
             let group_path = format!("{}/{}", path, group_name);
 
-            let (group, group_ok) = BackupGroup::read(provider, group_name, &group_path).map_err(|e| format!(
+            let (group, group_ok) = BackupGroup::read(provider, group_name, &group_path, false).map_err(|e| format!(
                 "Unable to list {:?} backup group: {}", group_path, e))?;
             ok &= group_ok;
 
@@ -62,13 +57,12 @@ impl BackupGroup {
         Ok((backup_groups, ok))
     }
 
-    // FIXME(konishchev): Make private?
-    pub fn read(provider: &dyn ReadProvider, name: &str, path: &str) -> GenericResult<(BackupGroup, bool)> {
+    pub fn read(provider: &dyn ReadProvider, name: &str, path: &str, strict: bool) -> GenericResult<(BackupGroup, bool)> {
         let mut ok = true;
-        let mut first = true;
+        let mut first_backup = true;
 
         let mut group = BackupGroup::new(name);
-        let backup_file_traits = BackupFileTraits::get_for(provider.type_());
+        let backup_traits = BackupTraits::get_for(provider.type_());
 
         let mut files = provider.list_directory(path)?.ok_or_else(||
             "The backup group doesn't exist".to_owned())?;
@@ -79,8 +73,8 @@ impl BackupGroup {
                 continue
             }
 
-            let captures = backup_file_traits.name_re.captures(&file.name);
-            if file.type_ != backup_file_traits.type_ || captures.is_none() {
+            let captures = backup_traits.name_regex.captures(&file.name);
+            if file.type_ != backup_traits.file_type || captures.is_none() {
                 error!("{:?} backup group on {} contains an unexpected {}: {:?}.",
                        path, provider.name(), file.type_, file.name);
                 ok = false;
@@ -90,8 +84,8 @@ impl BackupGroup {
             let backup_name = captures.unwrap().get(1).unwrap().as_str();
             let backup_path = format!("{}/{}", path, file.name);
 
-            if first {
-                first = false;
+            if first_backup {
+                first_backup = false;
 
                 if cfg!(not(test)) && backup_name.split('-').next().unwrap() != group.name {
                     error!(concat!(
@@ -108,9 +102,12 @@ impl BackupGroup {
             ) {
                 Ok(backup) => backup,
                 Err(e) => {
+                    if strict {
+                        return Err!("Error while reading {:?} backup: {}", backup_path, e);
+                    }
                     error!("{:?} backup on {} reading error: {}.", backup_path, provider.name(), e);
                     ok = false;
-                    continue
+                    continue;
                 }
             };
 

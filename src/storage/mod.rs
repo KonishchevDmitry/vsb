@@ -1,7 +1,7 @@
 mod adapters;
 mod backup;
 mod backup_group;
-mod helpers;
+mod traits;
 
 use std::rc::Rc;
 use std::time::SystemTime;
@@ -17,10 +17,10 @@ use crate::stream_splitter;
 use crate::util;
 
 use self::adapters::{AbstractProvider, ReadOnlyProviderAdapter, ReadWriteProviderAdapter};
-use self::helpers::BackupFileTraits;
 
 pub use self::backup::Backup;
 pub use self::backup_group::BackupGroup;
+pub use self::traits::BackupTraits;
 
 pub type StorageRc = Rc<Storage>;
 
@@ -46,6 +46,10 @@ impl Storage {
 
     pub fn name(&self) -> &str {
         self.provider.read().name()
+    }
+
+    pub fn backup_traits(&self) -> &'static BackupTraits {
+        BackupTraits::get_for(self.provider.read().type_())
     }
 
     // FIXME(konishchev): Rewrite
@@ -74,11 +78,19 @@ impl Storage {
         Ok(BackupGroup::new(name))
     }
 
+    pub fn get_backup_group(&self, name: &str, strict: bool) -> GenericResult<BackupGroup> {
+        let provider = self.provider.read();
+        let path = self.get_backup_group_path(name);
+        let (group, _ok) = BackupGroup::read(provider, name, &path, strict).map_err(|e| format!(
+            "Failed to read {:?} backup group: {}", path, e))?;
+        Ok(group)
+    }
+
     pub fn create_backup(&self, max_backups: usize) -> GenericResult<(BackupGroup, Backup)> {
         let provider = self.provider.write()?;
 
-        let backup_file_traits = BackupFileTraits::get_for(provider.type_());
-        if backup_file_traits.type_ != FileType::Directory {
+        let backup_traits = self.backup_traits();
+        if backup_traits.file_type != FileType::Directory {
             return Err!("Backup creation is not supported for {} provider", provider.name());
         }
 
@@ -92,7 +104,7 @@ impl Storage {
                 groups.pop().unwrap()
             },
             _ => {
-                let group_name = now.format(BackupGroup::NAME_FORMAT).to_string();
+                let group_name = now.format(backup_traits.group_name_format).to_string();
                 if groups.iter().any(|group| group.name == group_name) {
                     return Err!("Unable to create new backup group ({}): it already exists", group_name);
                 }
@@ -101,7 +113,7 @@ impl Storage {
         };
 
         // FIXME(konishchev): Check existence?
-        let backup_name = now.format(Backup::NAME_FORMAT).to_string();
+        let backup_name = now.format(backup_traits.name_format).to_string();
         let backup_path = self.get_backup_path(&group.name, &backup_name, true);
         let backup = Backup::new(&backup_path, &backup_name);
 
@@ -168,7 +180,7 @@ impl Storage {
     }
 
     fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {
-        let extension = BackupFileTraits::get_for(self.provider.read().type_()).extension;
+        let extension = BackupTraits::get_for(self.provider.read().type_()).extension;
 
         let prefix = if temporary {
             "."
@@ -180,7 +192,7 @@ impl Storage {
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
-        let backup_time = Local.datetime_from_str(backup_name, Backup::NAME_FORMAT)
+        let backup_time = Local.datetime_from_str(backup_name, self.backup_traits().name_format)
             .map_err(|_| format!("Invalid backup name: {:?}", backup_name))?;
 
         Ok(SystemTime::from(backup_time))

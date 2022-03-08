@@ -33,9 +33,6 @@ pub struct BackupOuterStat {
 }
 
 impl Backup {
-    #[cfg(not(test))] pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S";
-    #[cfg(test)] pub const NAME_FORMAT: &'static str = "%Y.%m.%d-%H:%M:%S.%3f";
-
     pub const METADATA_NAME: &'static str = "metadata.bz2";
     pub const DATA_NAME: &'static str = "data.tar.bz2"; // FIXME(konishchev): Variations
 

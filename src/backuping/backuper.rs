@@ -58,6 +58,7 @@ impl Backuper {
             },
         };
 
+        // FIXME(konishchev): Check for hardlinks
         let file_type = metadata.file_type();
 
         if file_type.is_file() {

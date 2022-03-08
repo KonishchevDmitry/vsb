@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use assert_fs::fixture::TempDir;
@@ -94,18 +94,19 @@ fn backup() -> EmptyResult {
 
     let group = groups.first().unwrap();
 
+    // FIXME(konishchev): Add same contents files
     let restore_path = temp_dir.join("restore");
     let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
-    let restorer = Restorer::new(storage.clone())?;
+    let restorer = Restorer::new(&Path::new(&group.backups.first().unwrap().path))?;
     restorer.restore(&group.name, &group.backups.first().unwrap().name, &restore_path)?;
 
     println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
-    // Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
-    // Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
-    fs::write(&mutable_file_path, "pass-0")?;
-    Command::new("git").args([
-        "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
-    ]).status()?.exit_ok()?;
+    Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
+    Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
+    // fs::write(&mutable_file_path, "pass-0")?;
+    // Command::new("git").args([
+    //     "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
+    // ]).status()?.exit_ok()?;
 
     Ok(())
 }
