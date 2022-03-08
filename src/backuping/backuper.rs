@@ -1,9 +1,11 @@
 use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
+use itertools::Itertools;
 use log::{debug, warn, error};
 use nix::fcntl::OFlag;
 
@@ -28,10 +30,30 @@ impl Backuper {
 
     // FIXME(konishchev): Implement + fsync
     pub fn run(mut self) -> Result<(), ()> {
+        let mut root_directories = HashSet::new();
+
         // FIXME(konishchev): Drop clone
         for item in &self.items.clone() {
             // FIXME(konishchev): To path?
             let path = Path::new(&item.path);
+
+            let mut parent = PathBuf::new();
+            for part in path.components().dropping_back(1) {
+                parent.push(part);
+
+                if let Component::RootDir = part {
+                    continue;
+                }
+
+                if !root_directories.contains(&parent) {
+                    // FIXME(konishchev): Ensure only directories, unwraps
+                    let metadata = fs::symlink_metadata(&parent).unwrap();
+                    self.backup.add_directory(&parent, &metadata).map_err(|e| format!(
+                        "Failed to backup {:?}: {}", parent, e)).unwrap();
+                    root_directories.insert(parent.clone());
+                }
+            }
+
             // FIXME(konishchev): unwrap
             self.backup_path(path, true).unwrap();
         }

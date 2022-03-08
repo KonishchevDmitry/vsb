@@ -1,11 +1,12 @@
 // FIXME(konishchev): Handle file truncation during backing up properly
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry as HashMapEntry};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf, Component};
 
 use itertools::Itertools;
+use log::error;
 use serde_json::Value;
 use tar::{Archive, Header, Entry, EntryType};
 
@@ -16,7 +17,9 @@ use crate::storage::{Storage, StorageRc, BackupGroup, Backup, BackupTraits};
 
 pub struct Restorer {
     storage: StorageRc,
-    plan: RestorePlan,
+    group_name: String,
+    backup_name: String,
+    permissions: Vec<(PathBuf, Permissions)>,
 }
 
 impl Restorer {
@@ -46,126 +49,93 @@ impl Restorer {
             return Err!("{:?} doesn't look like backup path", backup_path)
         }
 
-        let plan = RestorePlan::new(&storage, group_name, backup_name)?;
-        Ok(Restorer {storage, plan})
+        Ok(Restorer {
+            storage,
+            group_name: group_name.to_owned(),
+            backup_name: backup_name.to_owned(),
+            permissions: Vec::new(),
+        })
     }
 
-    // FIXME(konishchev): Rewrite
-    pub fn restore(&self, group_name: &str, backup_name: &str, path: &Path) -> EmptyResult {
-        let group_path = self.storage.get_backup_group_path(group_name);
-
-        // FIXME(konishchev): ok
-        let (mut group, _) = BackupGroup::read(self.storage.provider.read(), group_name, &group_path, true)?;
-
-        // FIXME(konishchev): Unwrap
-        let (position, _) = group.backups.iter().find_position(|backup| backup.name == backup_name).unwrap();
-        let tail_size = group.backups.len() - position - 1;
-
-        let mut extern_files: HashMap<Hash, Vec<String>> = HashMap::new();
-        let mut restore_plan = Vec::new();
-
-        for (index, backup) in group.backups.into_iter().rev().dropping(tail_size).enumerate() {
-            if index == 0 {
-                for file in backup.read_metadata(self.storage.provider.read())? {
-                    let file = file?;
-                    if !file.unique {
-                        extern_files.entry(file.hash).or_default().push(file.path);
-                    }
-                }
-
-                restore_plan.push(RestoreStepOld {backup, files: HashMap::new()})
-            } else {
-                if extern_files.is_empty() {
-                    break;
-                }
-
-                let mut files = HashMap::new();
-
-                for file in backup.read_metadata(self.storage.provider.read())? {
-                    let file = file?;
-                    if let Some(paths) = extern_files.remove(&file.hash) {
-                        files.insert(file.path, paths);
-                    }
-                }
-
-                if !files.is_empty() {
-                    restore_plan.push(RestoreStepOld {backup, files})
-                }
-            }
-        }
-
-        if !extern_files.is_empty() {
-            // FIXME(konishchev): Support
-            unimplemented!();
-        }
-
-        self.restore_impl(restore_plan, path)?;
-        Ok(())
-    }
-
-    // FIXME(konishchev): Rewrite
     // FIXME(konishchev): Implement
-    fn restore_impl(&self, plan: Vec<RestoreStepOld>, path: &Path) -> EmptyResult {
-        assert!(!plan.is_empty());
+    pub fn restore(mut self, restore_path: &Path) -> GenericResult<bool> {
+        let mut ok = true;
+        let plan = RestorePlan::new(&self.storage, &self.group_name, &self.backup_name)?;
 
-        let step = plan.first().unwrap();
+        // FIXME(konishchev): Permissions
+        fs::create_dir(restore_path).map_err(|e| format!(
+            "Failed to create {:?}: {}", restore_path, e))?;
+
+        for (index, step) in plan.steps.iter().enumerate() {
+            ok &= self.process_step(step, index == 0, restore_path).map_err(|e| format!(
+                "Failed to restore {:?} backup: {}", step.backup.path, e))?;
+        }
+
+        Ok(ok)
+    }
+
+    fn process_step(&mut self, step: &RestoreStep, is_target: bool, restore_dir: &Path) -> GenericResult<bool> {
+        let mut ok = true;
         let mut archive = step.backup.read_data(self.storage.provider.read())?;
-
-        fs::create_dir(path).map_err(|e| format!("Failed to create {:?}: {}", path, e))?;
-
-        // let mut directories = Vec::new();
-        // for entry in archive.entries()? {
-        //     let entry = entry?;
-            //     let mut file = entry.map_err(|e| TarError::new("failed to iterate over archive", e))?;
-        //
-        //     if file.header().entry_type() == crate::EntryType::Directory {
-        //         directories.push(file);
-        //     } else {
-        //         file.unpack_in(dst)?;
-        //     }
-        // }
-        // for mut dir in directories {
-        //     dir.unpack_isn(dst)?;
-        // }
-
-        Ok(())
-    }
-
-    // FIXME(konishchev): Implement
-    fn restore_target_backup(&mut self, mut archive: Archive<Box<dyn Read>>, restore_dir: &Path) -> EmptyResult {
-        let mut created_directories = HashMap::new(); // FIXME(konishchev): Implement
 
         for entry in archive.entries()? {
             let entry = entry?;
-            let path = entry.path()?;
             let header = entry.header();
+            let entry_path = entry.path()?;
+            let entry_type = header.entry_type();
 
-            let restore_path = get_restore_path(restore_dir, &path)?;
-            let permissions = self.get_permissions(header)?;
-
-            match header.entry_type() {
-                EntryType::Directory => {
+            // FIXME(konishchev): HERE
+            match entry_type {
+                EntryType::Directory => if is_target {
+                    let restore_path = get_full_path(restore_dir, &entry_path)?;
                     fs::create_dir(&restore_path).map_err(|e| format!(
                         "Unable to create {:?}: {}", restore_path, e))?;
-
-                    created_directories.insert(restore_path, permissions);
+                    self.schedule_permissions(restore_path, header)?;
                 }
+
                 EntryType::Regular => {
-                    // OpenOptions::new().write(true).create_new(true).open(dst)
+                    let file_path = get_full_path("/", entry_path)?;
+
+                    if let Some(info) = step.files.get(&file_path) {
+                        self.restore_files(info)?;
+                    } else if is_target {
+                        // FIXME(konishchev): Ensure external
+                        if entry.size() != 0 {
+                            error!("The backup archive has data for {:?} file which is expected to be external.", file_path);
+                            ok = false;
+                        }
+                    }
+                },
+
+                EntryType::Symlink => {
 
                 },
+
                 _ => {
                     // FIXME(konishchev): Support
-                    return Err!("Got an unsupported entry: {:?}", entry.path())
+                    return Err!("Got an unsupported entry ({:?}): {:?}", entry_type, entry_path)
                 }
             }
         }
 
+        Ok(ok)
+    }
+
+    // FIXME(konishchev): Implement
+    fn restore_files(&mut self, info: &FileInfo) -> EmptyResult {
+        // OpenOptions::new().write(true).create_new(true).open(dst)
+        Ok(())
+    }
+
+    // FIXME(konishchev): Support
+    fn schedule_permissions(&mut self, path: PathBuf, header: &Header) -> EmptyResult {
+        let permissions = self.get_permissions(header)?;
+        self.permissions.push((path.to_path_buf(), permissions));
         Ok(())
     }
 
     // FIXME(konishchev): Implement
-    fn get_permissions(&mut self, header: &Header) -> GenericResult<Permissions> {
+    fn get_permissions(&self, header: &Header) -> GenericResult<Permissions> {
         Ok(Permissions {})
     }
 }
@@ -514,18 +484,20 @@ fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
     Ok(())
 }
 
-fn get_restore_path(restore_dir: &Path, file_path: &Path) -> GenericResult<PathBuf> {
-    let mut path = restore_dir.to_path_buf();
+fn get_full_path<B, P>(base: B, file_path: P) -> GenericResult<PathBuf>
+    where B: AsRef<Path>, P: AsRef<Path>
+{
+    let file_path = file_path.as_ref();
+    let mut path = base.as_ref().to_path_buf();
+
     let mut changed = false;
 
-    for (index, part) in file_path.components().enumerate() {
-        match part {
-            Component::RootDir if index == 0 => {},
-            Component::Normal(part) if index != 0 => {
-                path.push(part);
-                changed = true;
-            },
-            _ => return Err!("Got an invalid file path from archive: {:?}", file_path),
+    for part in file_path.components() {
+        if let Component::Normal(part) = part {
+            path.push(part);
+            changed = true;
+        } else {
+            return Err!("Got an invalid file path from archive: {:?}", file_path);
         }
     }
 

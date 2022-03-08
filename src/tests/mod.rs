@@ -98,7 +98,7 @@ fn backup() -> EmptyResult {
     let restore_path = temp_dir.join("restore");
     let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
     let restorer = Restorer::new(&Path::new(&group.backups.first().unwrap().path))?;
-    restorer.restore(&group.name, &group.backups.first().unwrap().name, &restore_path)?;
+    restorer.restore(&restore_path)?;
 
     println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
     Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
