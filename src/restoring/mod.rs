@@ -121,7 +121,13 @@ impl Restorer {
                 },
 
                 EntryType::Symlink => {
+                    let target = entry.link_name()
+                        .map_err(|e| format!("Got an invalid {:?} symlink target path: {}", file_path, e))?
+                        .ok_or_else(|| format!("Got {:?} symlink without target path", file_path))?;
 
+                    let restore_path = get_restore_path(restore_dir, file_path)?;
+                    std::os::unix::fs::symlink(target, &restore_path).map_err(|e| format!(
+                        "Unable to create {:?} symlink: {}", restore_path, e))?;
                 },
 
                 _ => {
@@ -296,100 +302,6 @@ struct RestoreStepOld {
 fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
 
 /*
-        } else if kind.is_symlink() {
-            let src = match self.link_name()? {
-                Some(name) => name,
-                None => {
-                    return Err(other(&format!(
-                        "hard link listed for {} but no link name found",
-                        String::from_utf8_lossy(self.header.as_bytes())
-                    )));
-                }
-            };
-
-            if src.iter().count() == 0 {
-                return Err(other(&format!(
-                    "symlink destination for {} is empty",
-                    String::from_utf8_lossy(self.header.as_bytes())
-                )));
-            }
-
-            symlink(&src, dst)
-                .or_else(|err_io| {
-                    if err_io.kind() == io::ErrorKind::AlreadyExists && self.overwrite {
-                        // remove dest and try once more
-                        std::fs::remove_file(dst).and_then(|()| symlink(&src, dst))
-                    } else {
-                        Err(err_io)
-                    }
-                })
-                .map_err(|err| {
-                    Error::new(
-                        err.kind(),
-                        format!(
-                            "{} when symlinking {} to {}",
-                            err,
-                            src.display(),
-                            dst.display()
-                        ),
-                    )
-                })?;
-            return Ok(Unpacked::__Nonexhaustive);
-
-            #[cfg(target_arch = "wasm32")]
-            #[allow(unused_variables)]
-            fn symlink(src: &Path, dst: &Path) -> io::Result<()> {
-                Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
-            }
-
-            #[cfg(windows)]
-            fn symlink(src: &Path, dst: &Path) -> io::Result<()> {
-                ::std::os::windows::fs::symlink_file(src, dst)
-            }
-
-            #[cfg(unix)]
-            fn symlink(src: &Path, dst: &Path) -> io::Result<()> {
-                ::std::os::unix::fs::symlink(src, dst)
-            }
-        } else if kind.is_pax_global_extensions()
-            || kind.is_pax_local_extensions()
-            || kind.is_gnu_longname()
-            || kind.is_gnu_longlink()
-        {
-            return Ok(Unpacked::__Nonexhaustive);
-        };
-
-        let mut f = (|| -> io::Result<std::fs::File> {
-            for io in self.data.drain(..) {
-                match io {
-                    EntryIo::Data(mut d) => {
-                        let expected = d.limit();
-                        if io::copy(&mut d, &mut f)? != expected {
-                            return Err(other("failed to write entire file"));
-                        }
-                    }
-                    EntryIo::Pad(d) => {
-                        // TODO: checked cast to i64
-                        let to = SeekFrom::Current(d.limit() as i64);
-                        let size = f.seek(to)?;
-                        f.set_len(size)?;
-                    }
-                }
-            }
-            Ok(f)
-        })()
-        .map_err(|e| {
-            let header = self.header.path_bytes();
-            TarError::new(
-                format!(
-                    "failed to unpack `{}` into `{}`",
-                    String::from_utf8_lossy(&header),
-                    dst.display()
-                ),
-                e,
-            )
-        })?;
-
         if self.preserve_mtime {
             if let Ok(mtime) = self.header.mtime() {
                 // For some more information on this see the comments in
@@ -408,10 +320,6 @@ fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
         if let Ok(mode) = self.header.mode() {
             set_perms(dst, Some(&mut f), mode, self.preserve_permissions)?;
         }
-        if self.unpack_xattrs {
-            set_xattrs(self, dst)?;
-        }
-        return Ok(Unpacked::File(f));
 
         fn set_perms(
             dst: &Path,
@@ -447,88 +355,6 @@ fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
                 Some(f) => f.set_permissions(perm),
                 None => fs::set_permissions(dst, perm),
             }
-        }
-
-        #[cfg(windows)]
-        fn _set_perms(
-            dst: &Path,
-            f: Option<&mut std::fs::File>,
-            mode: u32,
-            _preserve: bool,
-        ) -> io::Result<()> {
-            if mode & 0o200 == 0o200 {
-                return Ok(());
-            }
-            match f {
-                Some(f) => {
-                    let mut perm = f.metadata()?.permissions();
-                    perm.set_readonly(true);
-                    f.set_permissions(perm)
-                }
-                None => {
-                    let mut perm = fs::metadata(dst)?.permissions();
-                    perm.set_readonly(true);
-                    fs::set_permissions(dst, perm)
-                }
-            }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        #[allow(unused_variables)]
-        fn _set_perms(
-            dst: &Path,
-            f: Option<&mut std::fs::File>,
-            mode: u32,
-            _preserve: bool,
-        ) -> io::Result<()> {
-            Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
-        }
-
-        #[cfg(all(unix, feature = "xattr"))]
-        fn set_xattrs(me: &mut EntryFields, dst: &Path) -> io::Result<()> {
-            use std::ffi::OsStr;
-            use std::os::unix::prelude::*;
-
-            let exts = match me.pax_extensions() {
-                Ok(Some(e)) => e,
-                _ => return Ok(()),
-            };
-            let exts = exts
-                .filter_map(|e| e.ok())
-                .filter_map(|e| {
-                    let key = e.key_bytes();
-                    let prefix = b"SCHILY.xattr.";
-                    if key.starts_with(prefix) {
-                        Some((&key[prefix.len()..], e))
-                    } else {
-                        None
-                    }
-                })
-                .map(|(key, e)| (OsStr::from_bytes(key), e.value_bytes()));
-
-            for (key, value) in exts {
-                xattr::set(dst, key, value).map_err(|e| {
-                    TarError::new(
-                        format!(
-                            "failed to set extended \
-                             attributes to {}. \
-                             Xattrs: key={:?}, value={:?}.",
-                            dst.display(),
-                            key,
-                            String::from_utf8_lossy(value)
-                        ),
-                        e,
-                    )
-                })?;
-            }
-
-            Ok(())
-        }
-        // Windows does not completely support posix xattrs
-        // https://en.wikipedia.org/wiki/Extended_file_attributes#Windows_NT
-        #[cfg(any(windows, not(feature = "xattr"), target_arch = "wasm32"))]
-        fn set_xattrs(_: &mut EntryFields, _: &Path) -> io::Result<()> {
-            Ok(())
         }
  */
 

@@ -94,7 +94,7 @@ fn backup() -> EmptyResult {
 
     let group = groups.first().unwrap();
 
-    // FIXME(konishchev): Add same contents files
+    // FIXME(konishchev): Add same contents files (to each step)
     let restore_path = temp_dir.join("restore");
     let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
     let restorer = Restorer::new(&Path::new(&group.backups.first().unwrap().path))?;
