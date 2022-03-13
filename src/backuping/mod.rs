@@ -1,6 +1,5 @@
 mod backup;
 mod backuper;
-mod file_reader;
 
 use crate::config::BackupConfig;
 use crate::core::GenericResult;

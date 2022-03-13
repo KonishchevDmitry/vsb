@@ -9,6 +9,7 @@ mod check;
 mod cli;
 mod config;
 mod encryptor;
+mod file_reader;
 mod hash;
 mod http_client;
 mod metadata;
@@ -29,7 +30,7 @@ use std::process;
 
 use log::error;
 
-use crate::cli::{Parser, GlobalOptions, Action};
+use crate::cli::{Action, GlobalOptions, Parser};
 use crate::config::Config;
 use crate::core::GenericResult;
 

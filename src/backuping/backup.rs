@@ -11,12 +11,11 @@ use tar::Header;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
+use crate::file_reader::FileReader;
 use crate::hash::Hash;
 use crate::metadata::{MetadataItem, Fingerprint, MetadataWriter};
 use crate::storage::{Storage, StorageRc, BackupGroup, Backup};
 use crate::util;
-
-use super::file_reader::FileReader;
 
 type Archive = tar::Builder<BufWriter<BzEncoder<File>>>;
 

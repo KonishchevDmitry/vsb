@@ -1,24 +1,32 @@
 // FIXME(konishchev): Handle file truncation during backing up properly
 
+mod multi_writer;
+
 use std::collections::{HashMap, HashSet, hash_map::Entry as HashMapEntry};
 use std::fs::{self, OpenOptions};
-use std::io::Read;
+use std::io;
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf, Component};
 
 use itertools::Itertools;
-use log::error;
+use log::{error, info};
 use serde_json::Value;
 use tar::{Archive, Header, Entry, EntryType};
 
 use crate::core::{EmptyResult, GenericError, GenericResult};
+use crate::file_reader::FileReader;
 use crate::hash::Hash;
 use crate::providers::filesystem::Filesystem;
 use crate::storage::{Storage, StorageRc, BackupGroup, Backup, BackupTraits};
+
+use multi_writer::MultiWriter;
 
 pub struct Restorer {
     storage: StorageRc,
     group_name: String,
     backup_name: String,
+    directories: HashSet<PathBuf>, // FIXME(konishchev): Check on finalization
     permissions: Vec<(PathBuf, Permissions)>,
 }
 
@@ -53,6 +61,7 @@ impl Restorer {
             storage,
             group_name: group_name.to_owned(),
             backup_name: backup_name.to_owned(),
+            directories: HashSet::new(),
             permissions: Vec::new(),
         })
     }
@@ -79,25 +88,29 @@ impl Restorer {
         let mut archive = step.backup.read_data(self.storage.provider.read())?;
 
         for entry in archive.entries()? {
-            let entry = entry?;
+            let mut entry = entry?;
             let header = entry.header();
             let entry_path = entry.path()?;
             let entry_type = header.entry_type();
+            let file_path = get_file_path(&entry_path)?;
 
             // FIXME(konishchev): HERE
             match entry_type {
                 EntryType::Directory => if is_target {
-                    let restore_path = get_full_path(restore_dir, &entry_path)?;
-                    fs::create_dir(&restore_path).map_err(|e| format!(
-                        "Unable to create {:?}: {}", restore_path, e))?;
+                    let restore_path = get_restore_path(restore_dir, &file_path)?;
+
+                    if !self.directories.remove(&file_path) {
+                        // FIXME(konishchev): Permissions
+                        fs::create_dir(&restore_path).map_err(|e| format!(
+                            "Unable to create {:?}: {}", restore_path, e))?;
+                    }
+
                     self.schedule_permissions(restore_path, header)?;
                 }
 
                 EntryType::Regular => {
-                    let file_path = get_full_path("/", entry_path)?;
-
                     if let Some(info) = step.files.get(&file_path) {
-                        self.restore_files(info)?;
+                        self.restore_files(&file_path, &mut entry, info, restore_dir, is_target)?;
                     } else if is_target {
                         // FIXME(konishchev): Ensure external
                         if entry.size() != 0 {
@@ -121,9 +134,47 @@ impl Restorer {
         Ok(ok)
     }
 
-    // FIXME(konishchev): Implement
-    fn restore_files(&mut self, info: &FileInfo) -> EmptyResult {
-        // OpenOptions::new().write(true).create_new(true).open(dst)
+    // FIXME(konishchev): Permissions
+    fn restore_files(
+        &mut self, source_path: &Path, data: &mut dyn Read, info: &FileInfo,
+        restore_dir: &Path, is_target: bool,
+    ) -> EmptyResult {
+        let paths = info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
+        info!("Restoring {}...", paths);
+
+        let mut files = Vec::new();
+
+        for path in &info.paths {
+            let restore_path = get_restore_path(restore_dir, path)?;
+
+            if is_target && path != source_path {
+                self.directories.extend(restore_dirs(restore_dir, path)?);
+            }
+
+            files.push(OpenOptions::new()
+                .write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
+                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
+        }
+
+        let mut files = MultiWriter::new(files);
+        let mut reader = FileReader::new(data, info.size);
+
+        io::copy(&mut reader, &mut files).map_err(|e| format!(
+            "Failed to restore {}: {}", paths, e))?;
+        let (bytes_read, hash) = reader.consume();
+
+        if bytes_read != info.size {
+            return Err!(
+                "Failed to restore {}: got an unexpected data size: {} vs {}",
+                paths, bytes_read, info.size);
+        }
+
+        if hash != info.hash {
+            return Err!(
+                "Failed to restore {}: the restored data has an unexpected hash: {} vs {}",
+                paths, hash, info.hash);
+        }
+
         Ok(())
     }
 
@@ -484,11 +535,9 @@ fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
     Ok(())
 }
 
-fn get_full_path<B, P>(base: B, file_path: P) -> GenericResult<PathBuf>
-    where B: AsRef<Path>, P: AsRef<Path>
-{
+fn get_file_path<P: AsRef<Path>>(file_path: P) -> GenericResult<PathBuf> {
     let file_path = file_path.as_ref();
-    let mut path = base.as_ref().to_path_buf();
+    let mut path = PathBuf::from("/");
 
     let mut changed = false;
 
@@ -506,6 +555,80 @@ fn get_full_path<B, P>(base: B, file_path: P) -> GenericResult<PathBuf>
     }
 
     Ok(path)
+}
+
+fn get_restore_path<R, P>(restore_dir: R, file_path: P) -> GenericResult<PathBuf>
+    where R: AsRef<Path>, P: AsRef<Path>
+{
+    let file_path = file_path.as_ref();
+    let mut restore_path = restore_dir.as_ref().to_path_buf();
+
+    let mut changed = false;
+
+    for (index, part) in file_path.components().enumerate() {
+        match part {
+            Component::RootDir if index == 0 => {},
+
+            Component::Normal(part) if index != 0 => {
+                restore_path.push(part);
+                changed = true;
+            },
+
+            _ => return Err!("Invalid restoring file path: {:?}", file_path),
+        }
+    }
+
+    if !changed {
+        return Err!("Invalid restoring file path: {:?}", file_path);
+    }
+
+    Ok(restore_path)
+}
+
+fn restore_dirs<R, P>(restore_dir: R, file_path: P) -> GenericResult<Vec<PathBuf>>
+    where R: AsRef<Path>, P: AsRef<Path>
+{
+    let mut path = file_path.as_ref();
+    let mut to_restore = Vec::new();
+    let mut restored_dirs = Vec::new();
+
+    loop {
+        path = path.parent().ok_or_else(|| format!(
+            "Invalid restoring file path: {:?}", file_path.as_ref()))?;
+
+        if path == Path::new("/") {
+            break;
+        }
+
+        let restore_path = get_restore_path(&restore_dir, path)?;
+
+        // FIXME(konishchev): Permissions
+        match fs::create_dir(&restore_path) {
+            Ok(_) => {
+                restored_dirs.push(path.to_owned());
+                break;
+            },
+            Err(err) => match err.kind() {
+                ErrorKind::NotFound => {
+                    to_restore.push(path.to_owned());
+                },
+                ErrorKind::AlreadyExists => {
+                    break;
+                }
+                _ => return Err!("Unable to create {:?}: {}", restore_path, err),
+            }
+        }
+    }
+
+    for path in to_restore {
+        let restore_path = get_restore_path(&restore_dir, &path)?;
+        // FIXME(konishchev): Permissions
+        fs::create_dir(&restore_path).map_err(|e| format!(
+            "Unable to create {:?}: {}", restore_path, e))?;
+        restored_dirs.push(path);
+    }
+
+    Ok(restored_dirs)
 }
 
 // FIXME(konishchev): User/group
