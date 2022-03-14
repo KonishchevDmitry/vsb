@@ -1,6 +1,7 @@
 // FIXME(konishchev): Drop
 #![feature(exit_status_error)]
 #![feature(io_error_more)]
+#![feature(unix_chown)]
 
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
@@ -23,6 +24,7 @@ mod stream_splitter;
 mod sync;
 #[cfg(test)] mod tests;
 mod uploader;
+mod users;
 mod util;
 
 use std::io::{self, Write};
