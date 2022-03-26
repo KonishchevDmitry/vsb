@@ -1,29 +1,29 @@
-// FIXME(konishchev): Handle file truncation during backing up properly
-
 mod file_metadata;
 mod multi_writer;
+mod plan;
+mod util;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Display;
-use std::fs::{self, DirBuilder, OpenOptions};
-use std::io;
-use std::io::{ErrorKind, Read};
-use std::os::unix::{self, fs::{DirBuilderExt, OpenOptionsExt}};
-use std::path::{Path, PathBuf, Component};
+use std::fs::OpenOptions;
+use std::io::{self, Read};
+use std::os::unix::{self, fs::OpenOptionsExt};
+use std::path::{Path, PathBuf};
 
 use itertools::Itertools;
 use log::{error, info};
 use tar::{Entry, EntryType, Header};
 
-use crate::core::{EmptyResult, GenericError, GenericResult};
+use crate::core::{EmptyResult, GenericResult};
 use crate::file_reader::FileReader;
-use crate::hash::Hash;
 use crate::providers::filesystem::Filesystem;
-use crate::storage::{Storage, StorageRc, Backup};
+use crate::storage::{Storage, StorageRc};
 use crate::users::UsersCache;
 
 use file_metadata::{FileMetadata, Owner};
 use multi_writer::MultiWriter;
+use plan::{RestorePlan, RestoreStep, RestoringFile};
+use util::get_restore_path;
 
 pub struct Restorer {
     storage: StorageRc,
@@ -31,8 +31,11 @@ pub struct Restorer {
     backup_name: String,
 
     users: Option<UsersCache>,
-    directories: HashSet<PathBuf>, // FIXME(konishchev): Check on finalization
-    file_metadata: Vec<(PathBuf, FileMetadata)>,
+    pending_extern_files: HashSet<PathBuf>,
+    restored_extern_files: HashSet<PathBuf>,
+    missing_extern_files: HashSet<PathBuf>,
+    pre_created_directories: HashSet<PathBuf>,
+    scheduled_file_metadata: Vec<(PathBuf, FileMetadata)>,
 }
 
 impl Restorer {
@@ -73,33 +76,44 @@ impl Restorer {
                 None
             },
 
-            directories: HashSet::new(),
-            file_metadata: Vec::new(),
+            pending_extern_files: HashSet::new(),
+            restored_extern_files: HashSet::new(),
+            missing_extern_files: HashSet::new(),
+            pre_created_directories: HashSet::new(),
+            scheduled_file_metadata: Vec::new(),
         })
     }
 
-    // FIXME(konishchev): Implement
     pub fn restore(mut self, restore_dir: &Path) -> GenericResult<bool> {
-        let mut ok = true;
-        let plan = RestorePlan::new(&self.storage, &self.group_name, &self.backup_name)?;
+        let (plan, mut ok) = RestorePlan::new(&self.storage, &self.group_name, &self.backup_name)?;
+        self.pending_extern_files = plan.extern_files;
+        self.missing_extern_files = plan.missing_files;
 
-        // FIXME(konishchev): Permissions
-        fs::create_dir(restore_dir).map_err(|e| format!(
-            "Failed to create {:?}: {}", restore_dir, e))?;
+        util::create_directory(restore_dir)?;
 
         for (index, step) in plan.steps.iter().enumerate() {
             ok &= self.process_step(step, index == 0, restore_dir).map_err(|e| format!(
                 "Failed to restore {:?} backup: {}", step.backup.path, e))?;
         }
 
-        for (path, metadata) in self.file_metadata {
-            // FIXME(konishchev): Don't fail, add checks
-            metadata.set(get_restore_path(restore_dir, path)?)?;
+        let missing_extern_data = self.pending_extern_files;
+        for (path, metadata) in self.scheduled_file_metadata.iter().rev() {
+            if !missing_extern_data.contains(path) {
+                metadata.set(get_restore_path(restore_dir, path)?)?;
+            }
         }
 
-        if !self.directories.is_empty() {
-            error!("The following directories have been unexpectedly created without known permissions:");
-            for path in self.directories {
+        if !missing_extern_data.is_empty() {
+            error!("Failed to restore the following files (missing extern data):");
+            for path in missing_extern_data {
+                error!("* {}", path.display())
+            }
+            ok = false;
+        }
+
+        if !self.pre_created_directories.is_empty() {
+            error!("The following directories have been unexpectedly restored without known permissions:");
+            for path in self.pre_created_directories {
                 error!("* {}", path.display());
             }
             ok = false;
@@ -117,12 +131,12 @@ impl Restorer {
             let header = entry.header();
             let entry_path = entry.path()?;
             let entry_type = header.entry_type();
-            let file_path = get_file_path(&entry_path)?;
+            let file_path = util::get_file_path_from_tar_path(&entry_path)?;
 
             match entry_type {
                 EntryType::Directory => if is_target {
-                    if !self.directories.remove(&file_path) {
-                        create_directory(get_restore_path(restore_dir, &file_path)?)?;
+                    if !self.pre_created_directories.remove(&file_path) {
+                        util::create_directory(get_restore_path(restore_dir, &file_path)?)?;
                     }
                     self.schedule_file_metadata_change(file_path, header)?;
                 }
@@ -131,12 +145,16 @@ impl Restorer {
                     if let Some(info) = step.files.get(&file_path) {
                         self.restore_files(&file_path, entry, info, restore_dir, is_target)?;
                     } else if is_target {
-                        // FIXME(konishchev): Ensure external
-                        if entry.size() != 0 {
-                            error!("The backup archive has data for {:?} file which is expected to be external.", file_path);
+                        if self.pending_extern_files.contains(&file_path) || self.restored_extern_files.contains(&file_path) {
+                            if entry.size() != 0 {
+                                error!("The backup archive has data for {:?} file which is expected to be external.", file_path);
+                                ok = false;
+                            }
+                            self.schedule_file_metadata_change(file_path, header)?;
+                        } else if !self.missing_extern_files.contains(&file_path) {
+                            error!("The backup archive contains an unexpected {:?} file. Ignore it.", file_path);
                             ok = false;
                         }
-                        self.schedule_file_metadata_change(file_path, header)?;
                     }
                 },
 
@@ -163,9 +181,8 @@ impl Restorer {
         Ok(ok)
     }
 
-    // FIXME(konishchev): Permissions
     fn restore_files(
-        &mut self, source_path: &Path, mut entry: Entry<Box<dyn Read>>, info: &FileInfo,
+        &mut self, source_path: &Path, mut entry: Entry<Box<dyn Read>>, info: &RestoringFile,
         restore_dir: &Path, is_target: bool,
     ) -> EmptyResult {
         let paths = info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
@@ -177,19 +194,21 @@ impl Restorer {
         for path in &info.paths {
             let restore_path = get_restore_path(restore_dir, path)?;
 
+            files.push(OpenOptions::new()
+                .create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).write(true)
+                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
+
             if is_target {
                 if path == source_path {
                     let metadata = self.get_file_metadata(entry.header())?;
-                    assert!(restore_metadata.replace((restore_path.clone(), metadata)).is_none());
+                    assert!(restore_metadata.replace((restore_path, metadata)).is_none());
                 } else {
-                    // FIXME(konishchev): Check also that we'll change all file permissions?
-                    self.directories.extend(restore_directories(restore_dir, path)?);
+                    self.pre_created_directories.extend(util::restore_directories(restore_dir, path)?);
+                    self.restored_extern_files.insert(self.pending_extern_files.take(path).unwrap());
                 }
+            } else {
+                self.restored_extern_files.insert(self.pending_extern_files.take(path).unwrap());
             }
-
-            files.push(OpenOptions::new()
-                .write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
-                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
         }
 
         let mut files = MultiWriter::new(files);
@@ -218,9 +237,8 @@ impl Restorer {
         Ok(())
     }
 
-    // FIXME(konishchev): Support
     fn schedule_file_metadata_change(&mut self, path: PathBuf, header: &Header) -> EmptyResult {
-        self.file_metadata.push((path, self.get_file_metadata(header)?));
+        self.scheduled_file_metadata.push((path, self.get_file_metadata(header)?));
         Ok(())
     }
 
@@ -261,198 +279,4 @@ impl Restorer {
 
         Ok(FileMetadata {owner, mode, mtime})
     }
-}
-
-struct FileInfo {
-    hash: Hash,
-    size: u64,
-    paths: Vec<PathBuf>,
-}
-
-struct RestoreStep {
-    backup: Backup,
-    files: HashMap<PathBuf, FileInfo>,
-}
-
-struct RestorePlan {
-    steps: Vec<RestoreStep>,
-    missing: HashSet<PathBuf>,
-}
-
-impl RestorePlan {
-    fn new(storage: &Storage, group_name: &str, backup_name: &str) -> GenericResult<RestorePlan> {
-        let provider = storage.provider.read();
-        let group = storage.get_backup_group(group_name, true)?;
-
-        let mut steps = Vec::new();
-        let mut extern_files: HashMap<Hash, Vec<PathBuf>> = HashMap::new();
-
-        for backup in group.backups.into_iter().rev() {
-            if steps.is_empty() && backup.name != backup_name {
-                continue;
-            }
-
-            let map_read_error = |error: GenericError| -> String {
-                return format!("Error while reading {:?} backup metadata: {}", backup.path, error);
-            };
-
-            let mut to_restore = HashMap::new();
-
-            if steps.is_empty() {
-                let mut unique_files = Vec::new();
-
-                for file in backup.read_metadata(provider).map_err(map_read_error)? {
-                    let file = file.map_err(map_read_error)?;
-                    let path = PathBuf::from(file.path);
-
-                    if file.unique || file.size == 0 {
-                        unique_files.push((path, file.hash, file.size));
-                    } else {
-                        extern_files.entry(file.hash).or_default().push(path);
-                    }
-                }
-
-                for (path, hash, size) in unique_files {
-                    let mut paths = extern_files.remove(&hash).unwrap_or_default();
-                    paths.reserve_exact(1);
-                    paths.push(path.clone());
-                    to_restore.insert(path, FileInfo {hash, size, paths});
-                }
-            } else {
-                if extern_files.is_empty() {
-                    break;
-                }
-
-                for file in backup.read_metadata(provider).map_err(map_read_error)? {
-                    let file = file.map_err(map_read_error)?;
-                    if let Some(paths) = extern_files.remove(&file.hash) {
-                        to_restore.insert(file.path.into(), FileInfo {
-                            hash: file.hash,
-                            size: file.size,
-                            paths
-                        });
-                    }
-                }
-            }
-
-            if steps.is_empty() || !to_restore.is_empty() {
-                steps.push(RestoreStep {backup, files: to_restore});
-            }
-        }
-
-        if steps.is_empty() {
-            return Err!("The backup doesn't exist");
-        }
-
-        let mut missing = HashSet::new();
-        for paths in extern_files.into_values() {
-            for path in paths {
-                missing.insert(path);
-            }
-        }
-
-        Ok(RestorePlan {steps, missing})
-    }
-}
-
-fn get_file_path<P: AsRef<Path>>(file_path: P) -> GenericResult<PathBuf> {
-    let file_path = file_path.as_ref();
-    let mut path = PathBuf::from("/");
-
-    let mut changed = false;
-
-    for part in file_path.components() {
-        if let Component::Normal(part) = part {
-            path.push(part);
-            changed = true;
-        } else {
-            return Err!("Got an invalid file path from archive: {:?}", file_path);
-        }
-    }
-
-    if !changed {
-        return Err!("Got an invalid file path from archive: {:?}", file_path);
-    }
-
-    Ok(path)
-}
-
-fn get_restore_path<R, P>(restore_dir: R, file_path: P) -> GenericResult<PathBuf>
-    where R: AsRef<Path>, P: AsRef<Path>
-{
-    let file_path = file_path.as_ref();
-    let mut restore_path = restore_dir.as_ref().to_path_buf();
-
-    let mut changed = false;
-
-    for (index, part) in file_path.components().enumerate() {
-        match part {
-            Component::RootDir if index == 0 => {},
-
-            Component::Normal(part) if index != 0 => {
-                restore_path.push(part);
-                changed = true;
-            },
-
-            _ => return Err!("Invalid restoring file path: {:?}", file_path),
-        }
-    }
-
-    if !changed {
-        return Err!("Invalid restoring file path: {:?}", file_path);
-    }
-
-    Ok(restore_path)
-}
-
-fn restore_directories<R, P>(restore_dir: R, file_path: P) -> GenericResult<Vec<PathBuf>>
-    where R: AsRef<Path>, P: AsRef<Path>
-{
-    let mut path = file_path.as_ref();
-    let mut to_restore = Vec::new();
-    let mut restored_dirs = Vec::new();
-
-    loop {
-        path = path.parent().ok_or_else(|| format!(
-            "Invalid restoring file path: {:?}", file_path.as_ref()))?;
-
-        if path == Path::new("/") {
-            break;
-        }
-
-        let restore_path = get_restore_path(&restore_dir, path)?;
-
-        // FIXME(konishchev): Permissions
-        match fs::create_dir(&restore_path) {
-            Ok(_) => {
-                restored_dirs.push(path.to_owned());
-                break;
-            },
-            Err(err) => match err.kind() {
-                ErrorKind::NotFound => {
-                    to_restore.push(path.to_owned());
-                },
-                ErrorKind::AlreadyExists => {
-                    break;
-                }
-                _ => return Err!("Unable to create {:?}: {}", restore_path, err),
-            }
-        }
-    }
-
-    for path in to_restore {
-        let restore_path = get_restore_path(&restore_dir, &path)?;
-        // FIXME(konishchev): Permissions
-        fs::create_dir(&restore_path).map_err(|e| format!(
-            "Unable to create {:?}: {}", restore_path, e))?;
-        restored_dirs.push(path);
-    }
-
-    Ok(restored_dirs)
-}
-
-fn create_directory<P: AsRef<Path>>(path: P) -> EmptyResult {
-    let path = path.as_ref();
-    Ok(DirBuilder::new().mode(0o700).create(path).map_err(|e| format!(
-        "Unable to create {:?}: {}", path, e))?)
 }

@@ -99,7 +99,8 @@ fn backup() -> EmptyResult {
 
     let group = groups.first().unwrap();
 
-    // FIXME(konishchev): Add same contents files (to each step), permissions test
+    // FIXME(konishchev): Restore sequentially all backups
+    // FIXME(konishchev): Add same contents files (to each step), permissions test, suid, guid, sticky
     let restore_path = temp_dir.join("restore");
     let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
     let restorer = Restorer::new(&Path::new(&group.backups.first().unwrap().path))?;
@@ -108,7 +109,14 @@ fn backup() -> EmptyResult {
     // println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
     // Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
     // Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
+    // FIXME(konishchev): Modify time
     fs::write(&mutable_file_path, "pass-0")?;
+
+    Command::new("bash").arg("-ec").arg(format!(
+        "set -o pipefail && diff -u <(cd {:?} && ls -ARl) <(cd {:?} && ls -ARl)",
+        root_path, restored_root_path
+    )).status()?.exit_ok()?;
+
     Command::new("git").args([
         "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
     ]).status()?.exit_ok()?;
