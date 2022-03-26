@@ -15,7 +15,7 @@ use crate::hash::Hash;
 use crate::metadata::{Fingerprint, MetadataItem};
 use crate::providers::filesystem::Filesystem;
 use crate::restoring::Restorer;
-use crate::storage::{Backup, BackupGroup, Storage};
+use crate::storage::{Backup, Storage};
 
 // FIXME(konishchev): Rewrite
 #[test]
@@ -94,19 +94,19 @@ fn backup() -> EmptyResult {
 
     let group = groups.first().unwrap();
 
-    // FIXME(konishchev): Add same contents files (to each step)
+    // FIXME(konishchev): Add same contents files (to each step), permissions test
     let restore_path = temp_dir.join("restore");
     let restored_root_path = restore_path.join(&root_path.to_str().unwrap()[1..]);
     let restorer = Restorer::new(&Path::new(&group.backups.first().unwrap().path))?;
     restorer.restore(&restore_path)?;
 
-    println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
-    Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
-    Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
-    // fs::write(&mutable_file_path, "pass-0")?;
-    // Command::new("git").args([
-    //     "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
-    // ]).status()?.exit_ok()?;
+    // println!("{} {}", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap());
+    // Command::new("ls").arg("-la").arg(root_path).spawn()?.wait()?;
+    // Command::new("ls").arg("-la").arg(restored_root_path).spawn()?.wait()?;
+    fs::write(&mutable_file_path, "pass-0")?;
+    Command::new("git").args([
+        "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap(),
+    ]).status()?.exit_ok()?;
 
     Ok(())
 }

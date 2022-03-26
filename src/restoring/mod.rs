@@ -1,33 +1,38 @@
 // FIXME(konishchev): Handle file truncation during backing up properly
 
+mod file_metadata;
 mod multi_writer;
 
-use std::collections::{HashMap, HashSet, hash_map::Entry as HashMapEntry};
-use std::fs::{self, OpenOptions};
+use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
-use std::io::{ErrorKind, Read, Seek, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt;
+use std::io::{ErrorKind, Read};
+use std::os::unix::{self, fs::{DirBuilderExt, OpenOptionsExt}};
 use std::path::{Path, PathBuf, Component};
 
 use itertools::Itertools;
 use log::{error, info};
-use serde_json::Value;
-use tar::{Archive, Header, Entry, EntryType};
+use tar::{Entry, EntryType, Header};
 
 use crate::core::{EmptyResult, GenericError, GenericResult};
 use crate::file_reader::FileReader;
 use crate::hash::Hash;
 use crate::providers::filesystem::Filesystem;
-use crate::storage::{Storage, StorageRc, BackupGroup, Backup, BackupTraits};
+use crate::storage::{Storage, StorageRc, Backup};
+use crate::users::UsersCache;
 
+use file_metadata::{FileMetadata, Owner};
 use multi_writer::MultiWriter;
 
 pub struct Restorer {
     storage: StorageRc,
     group_name: String,
     backup_name: String,
+
+    users: Option<UsersCache>,
     directories: HashSet<PathBuf>, // FIXME(konishchev): Check on finalization
-    permissions: Vec<(PathBuf, Permissions)>,
+    file_metadata: Vec<(PathBuf, FileMetadata)>,
 }
 
 impl Restorer {
@@ -61,23 +66,43 @@ impl Restorer {
             storage,
             group_name: group_name.to_owned(),
             backup_name: backup_name.to_owned(),
+
+            users: if nix::unistd::geteuid().is_root() {
+                Some(UsersCache::new())
+            } else {
+                None
+            },
+
             directories: HashSet::new(),
-            permissions: Vec::new(),
+            file_metadata: Vec::new(),
         })
     }
 
     // FIXME(konishchev): Implement
-    pub fn restore(mut self, restore_path: &Path) -> GenericResult<bool> {
+    pub fn restore(mut self, restore_dir: &Path) -> GenericResult<bool> {
         let mut ok = true;
         let plan = RestorePlan::new(&self.storage, &self.group_name, &self.backup_name)?;
 
         // FIXME(konishchev): Permissions
-        fs::create_dir(restore_path).map_err(|e| format!(
-            "Failed to create {:?}: {}", restore_path, e))?;
+        fs::create_dir(restore_dir).map_err(|e| format!(
+            "Failed to create {:?}: {}", restore_dir, e))?;
 
         for (index, step) in plan.steps.iter().enumerate() {
-            ok &= self.process_step(step, index == 0, restore_path).map_err(|e| format!(
+            ok &= self.process_step(step, index == 0, restore_dir).map_err(|e| format!(
                 "Failed to restore {:?} backup: {}", step.backup.path, e))?;
+        }
+
+        for (path, metadata) in self.file_metadata {
+            // FIXME(konishchev): Don't fail, add checks
+            metadata.set(get_restore_path(restore_dir, path)?)?;
+        }
+
+        if !self.directories.is_empty() {
+            error!("The following directories have been unexpectedly created without known permissions:");
+            for path in self.directories {
+                error!("* {}", path.display());
+            }
+            ok = false;
         }
 
         Ok(ok)
@@ -88,51 +113,49 @@ impl Restorer {
         let mut archive = step.backup.read_data(self.storage.provider.read())?;
 
         for entry in archive.entries()? {
-            let mut entry = entry?;
+            let entry = entry?;
             let header = entry.header();
             let entry_path = entry.path()?;
             let entry_type = header.entry_type();
             let file_path = get_file_path(&entry_path)?;
 
-            // FIXME(konishchev): HERE
             match entry_type {
                 EntryType::Directory => if is_target {
-                    let restore_path = get_restore_path(restore_dir, &file_path)?;
-
                     if !self.directories.remove(&file_path) {
-                        // FIXME(konishchev): Permissions
-                        fs::create_dir(&restore_path).map_err(|e| format!(
-                            "Unable to create {:?}: {}", restore_path, e))?;
+                        create_directory(get_restore_path(restore_dir, &file_path)?)?;
                     }
-
-                    self.schedule_permissions(restore_path, header)?;
+                    self.schedule_file_metadata_change(file_path, header)?;
                 }
 
                 EntryType::Regular => {
                     if let Some(info) = step.files.get(&file_path) {
-                        self.restore_files(&file_path, &mut entry, info, restore_dir, is_target)?;
+                        self.restore_files(&file_path, entry, info, restore_dir, is_target)?;
                     } else if is_target {
                         // FIXME(konishchev): Ensure external
                         if entry.size() != 0 {
                             error!("The backup archive has data for {:?} file which is expected to be external.", file_path);
                             ok = false;
                         }
+                        self.schedule_file_metadata_change(file_path, header)?;
                     }
                 },
 
-                EntryType::Symlink => {
+                EntryType::Symlink => if is_target {
                     let target = entry.link_name()
                         .map_err(|e| format!("Got an invalid {:?} symlink target path: {}", file_path, e))?
                         .ok_or_else(|| format!("Got {:?} symlink without target path", file_path))?;
 
                     let restore_path = get_restore_path(restore_dir, file_path)?;
-                    std::os::unix::fs::symlink(target, &restore_path).map_err(|e| format!(
+                    unix::fs::symlink(target, &restore_path).map_err(|e| format!(
                         "Unable to create {:?} symlink: {}", restore_path, e))?;
+
+                    self.get_file_metadata(header)?.set(&restore_path)?;
                 },
 
                 _ => {
-                    // FIXME(konishchev): Support
-                    return Err!("Got an unsupported entry ({:?}): {:?}", entry_type, entry_path)
+                    return Err!(
+                        "Got an unsupported archive entry ({:?}): {:?}",
+                        entry_type, entry_path)
                 }
             }
         }
@@ -142,19 +165,26 @@ impl Restorer {
 
     // FIXME(konishchev): Permissions
     fn restore_files(
-        &mut self, source_path: &Path, data: &mut dyn Read, info: &FileInfo,
+        &mut self, source_path: &Path, mut entry: Entry<Box<dyn Read>>, info: &FileInfo,
         restore_dir: &Path, is_target: bool,
     ) -> EmptyResult {
         let paths = info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
         info!("Restoring {}...", paths);
 
         let mut files = Vec::new();
+        let mut restore_metadata = None;
 
         for path in &info.paths {
             let restore_path = get_restore_path(restore_dir, path)?;
 
-            if is_target && path != source_path {
-                self.directories.extend(restore_dirs(restore_dir, path)?);
+            if is_target {
+                if path == source_path {
+                    let metadata = self.get_file_metadata(entry.header())?;
+                    assert!(restore_metadata.replace((restore_path.clone(), metadata)).is_none());
+                } else {
+                    // FIXME(konishchev): Check also that we'll change all file permissions?
+                    self.directories.extend(restore_directories(restore_dir, path)?);
+                }
             }
 
             files.push(OpenOptions::new()
@@ -163,7 +193,7 @@ impl Restorer {
         }
 
         let mut files = MultiWriter::new(files);
-        let mut reader = FileReader::new(data, info.size);
+        let mut reader = FileReader::new(&mut entry, info.size);
 
         io::copy(&mut reader, &mut files).map_err(|e| format!(
             "Failed to restore {}: {}", paths, e))?;
@@ -181,19 +211,55 @@ impl Restorer {
                 paths, hash, info.hash);
         }
 
+        if let Some((path, metadata)) = restore_metadata {
+            metadata.set(&path)?;
+        }
+
         Ok(())
     }
 
     // FIXME(konishchev): Support
-    fn schedule_permissions(&mut self, path: PathBuf, header: &Header) -> EmptyResult {
-        let permissions = self.get_permissions(header)?;
-        self.permissions.push((path.to_path_buf(), permissions));
+    fn schedule_file_metadata_change(&mut self, path: PathBuf, header: &Header) -> EmptyResult {
+        self.file_metadata.push((path, self.get_file_metadata(header)?));
         Ok(())
     }
 
-    // FIXME(konishchev): Implement
-    fn get_permissions(&self, header: &Header) -> GenericResult<Permissions> {
-        Ok(Permissions {})
+    fn get_file_metadata(&self, header: &Header) -> GenericResult<FileMetadata> {
+        fn map_err<E: Display>(header: &Header, name: &str, err: E) -> String {
+            format!("Got an invalid {}{} from archive: {}", name, match header.path() {
+                Ok(path) => format!(" for {:?}", path),
+                Err(_) => String::new(),
+            }, err)
+        }
+
+        let owner = self.users.as_ref().map(|users| -> GenericResult<Owner> {
+            let mut uid = header.uid()?.try_into().map_err(|e| map_err(header, "user ID", e))?;
+            if let Some(name) = header.username().map_err(|e| map_err(header, "user name", e))? {
+                if let Some(id) = users.get_uid(name)? {
+                    uid = id;
+                }
+            }
+
+            let mut gid = header.gid()?.try_into().map_err(|e| map_err(header, "group ID", e))?;
+            if let Some(name) = header.groupname().map_err(|e| map_err(header, "group name", e))? {
+                if let Some(id) = users.get_gid(name)? {
+                    gid = id;
+                }
+            }
+
+            Ok(Owner {uid, gid})
+        }).transpose()?;
+
+        let mode = if header.entry_type() == EntryType::Symlink {
+            None
+        } else {
+            Some(header.mode()?)
+        };
+
+        let mtime = header.mtime()?.try_into().map_err(|e| map_err(
+            header, "file modification time", e))?;
+
+        Ok(FileMetadata {owner, mode, mtime})
     }
 }
 
@@ -289,78 +355,6 @@ impl RestorePlan {
     }
 }
 
-struct Permissions {
-}
-
-// FIXME(konishchev): Drop
-struct RestoreStepOld {
-    backup: Backup,
-    files: HashMap<String, Vec<String>>,
-}
-
-// FIXME(konishchev): Implement
-fn unpack_in<R: Read>(entry: Entry<R>, dst: &Path) -> EmptyResult {
-
-/*
-        if self.preserve_mtime {
-            if let Ok(mtime) = self.header.mtime() {
-                // For some more information on this see the comments in
-                // `Header::fill_platform_from`, but the general idea is that
-                // we're trying to avoid 0-mtime files coming out of archives
-                // since some tools don't ingest them well. Perhaps one day
-                // when Cargo stops working with 0-mtime archives we can remove
-                // this.
-                let mtime = if mtime == 0 { 1 } else { mtime };
-                let mtime = FileTime::from_unix_time(mtime as i64, 0);
-                filetime::set_file_handle_times(&f, Some(mtime), Some(mtime)).map_err(|e| {
-                    TarError::new(format!("failed to set mtime for `{}`", dst.display()), e)
-                })?;
-            }
-        }
-        if let Ok(mode) = self.header.mode() {
-            set_perms(dst, Some(&mut f), mode, self.preserve_permissions)?;
-        }
-
-        fn set_perms(
-            dst: &Path,
-            f: Option<&mut std::fs::File>,
-            mode: u32,
-            preserve: bool,
-        ) -> Result<(), TarError> {
-            _set_perms(dst, f, mode, preserve).map_err(|e| {
-                TarError::new(
-                    format!(
-                        "failed to set permissions to {:o} \
-                         for `{}`",
-                        mode,
-                        dst.display()
-                    ),
-                    e,
-                )
-            })
-        }
-
-        #[cfg(unix)]
-        fn _set_perms(
-            dst: &Path,
-            f: Option<&mut std::fs::File>,
-            mode: u32,
-            preserve: bool,
-        ) -> io::Result<()> {
-            use std::os::unix::prelude::*;
-
-            let mode = if preserve { mode } else { mode & 0o777 };
-            let perm = fs::Permissions::from_mode(mode as _);
-            match f {
-                Some(f) => f.set_permissions(perm),
-                None => fs::set_permissions(dst, perm),
-            }
-        }
- */
-
-    Ok(())
-}
-
 fn get_file_path<P: AsRef<Path>>(file_path: P) -> GenericResult<PathBuf> {
     let file_path = file_path.as_ref();
     let mut path = PathBuf::from("/");
@@ -411,7 +405,7 @@ fn get_restore_path<R, P>(restore_dir: R, file_path: P) -> GenericResult<PathBuf
     Ok(restore_path)
 }
 
-fn restore_dirs<R, P>(restore_dir: R, file_path: P) -> GenericResult<Vec<PathBuf>>
+fn restore_directories<R, P>(restore_dir: R, file_path: P) -> GenericResult<Vec<PathBuf>>
     where R: AsRef<Path>, P: AsRef<Path>
 {
     let mut path = file_path.as_ref();
@@ -457,22 +451,8 @@ fn restore_dirs<R, P>(restore_dir: R, file_path: P) -> GenericResult<Vec<PathBuf
     Ok(restored_dirs)
 }
 
-// FIXME(konishchev): User/group
-// FIXME(konishchev): Implement
-/*
-fn set_perms(
-    dst: &Path,
-    f: Option<&mut std::fs::File>,
-    mode: u32,
-    preserve: bool,
-) -> io::Result<()> {
-    use std::os::unix::prelude::*;
-
-    let mode = if preserve { mode } else { mode & 0o777 };
-    let perm = fs::Permissions::from_mode(mode as _);
-    match f {
-        Some(f) => f.set_permissions(perm),
-        None => fs::set_permissions(dst, perm),
-    }
+fn create_directory<P: AsRef<Path>>(path: P) -> EmptyResult {
+    let path = path.as_ref();
+    Ok(DirBuilder::new().mode(0o700).create(path).map_err(|e| format!(
+        "Unable to create {:?}: {}", path, e))?)
 }
- */

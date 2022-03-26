@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};

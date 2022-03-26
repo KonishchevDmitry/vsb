@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, BufReader};
-use std::sync::Arc;
 
 use bzip2::read::BzDecoder;
 use log::error;

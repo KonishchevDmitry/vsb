@@ -2,7 +2,7 @@ use const_format::concatcp;
 use lazy_static::lazy_static;
 use regex::{self, Regex};
 
-use crate::provider::{ProviderType, FileType, ReadProvider};
+use crate::provider::{ProviderType, FileType};
 
 const DAY_PRECISION_NAME_FORMAT: &'static str = "%Y.%m.%d";
 const DAY_PRECISION_NAME_REGEX: &'static str = r"\d{4}\.\d{2}\.\d{2}";

@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use log::error;
-use regex::{self, Regex};
 
-use crate::core::{EmptyResult, GenericResult};
+use crate::core::GenericResult;
 use crate::provider::{ReadProvider, FileType};
 
 use super::backup::Backup;

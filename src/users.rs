@@ -17,28 +17,28 @@ impl UsersCache {
     }
 
     pub fn get_uid(&self, name: &str) -> GenericResult<Option<u32>> {
-        Ok(*match self.users.borrow_mut().unwrap().entry(name) {
+        Ok(match self.users.borrow_mut().entry(name.to_owned()) {
             Entry::Vacant(entry) => {
                 let user = User::from_name(name).map_err(|e| format!(
                     "Unable to lookup {:?} user: {}", name, e))?;
 
-                entry.insert(user.map(|user| user.uid))
+                *entry.insert(user.map(|user| user.uid.as_raw()))
             },
 
-            Entry::Occupied(entry) => entry.get(),
+            Entry::Occupied(entry) => *entry.get(),
         })
     }
 
     pub fn get_gid(&self, name: &str) -> GenericResult<Option<u32>> {
-        Ok(*match self.groups.borrow_mut().unwrap().entry(name) {
+        Ok(match self.groups.borrow_mut().entry(name.to_owned()) {
             Entry::Vacant(entry) => {
                 let group = Group::from_name(name).map_err(|e| format!(
                     "Unable to lookup {:?} group: {}", name, e))?;
 
-                entry.insert(group.map(|group| group.gid))
+                *entry.insert(group.map(|group| group.gid.as_raw()))
             },
 
-            Entry::Occupied(entry) => entry.get(),
+            Entry::Occupied(entry) => *entry.get(),
         })
     }
 }
