@@ -305,7 +305,7 @@ impl RestorePlan {
                     let file = file.map_err(map_read_error)?;
                     let path = PathBuf::from(file.path);
 
-                    if file.unique {
+                    if file.unique || file.size == 0 {
                         unique_files.push((path, file.hash, file.size));
                     } else {
                         extern_files.entry(file.hash).or_default().push(path);

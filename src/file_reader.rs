@@ -1,13 +1,19 @@
 use std::io::{self, Read};
 
-use digest::Digest;
-use sha2::Sha512;
+use digest::Digest as DigestTrait;
+use lazy_static::lazy_static;
 
 use crate::hash::Hash;
 
+type Digest = sha2::Sha512;
+
+lazy_static! {
+    pub static ref EMPTY_FILE_HASH: Hash = Digest::new().finalize().as_slice().into();
+}
+
 pub struct FileReader<'a> {
     file: &'a mut dyn Read,
-    digest: Sha512,
+    digest: Digest,
     bytes_read: u64,
     bytes_left: u64,
     truncated: bool,
@@ -17,7 +23,7 @@ impl<'a> FileReader<'a> {
     pub fn new(file: &mut dyn Read, size: u64) -> FileReader {
         FileReader {
             file,
-            digest: Sha512::new(),
+            digest: Digest::new(),
             bytes_read: 0,
             bytes_left: size,
             truncated: false,
@@ -81,7 +87,7 @@ mod tests {
             .collect();
 
         let test = |file_mock: &[u8], file_size: usize| {
-            let expected_hash: Hash = Sha512::digest(file_mock).as_slice().into();
+            let expected_hash: Hash = Digest::digest(file_mock).as_slice().into();
 
             let mut result_data: Vec<u8> = Vec::with_capacity(file_size);
             let expected_data: Vec<u8> = file_mock.iter().cloned()

@@ -6,6 +6,7 @@ use std::process::Command;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use log::info;
+use maplit::hashset;
 use sha2::Sha512;
 
 use crate::backuping::{Backuper, BackupInstance};
@@ -65,11 +66,15 @@ fn backup() -> EmptyResult {
         let backup = group.backups.last().unwrap();
         let files = read_metadata(&filesystem, backup)?;
 
-        for empty_file in [user_path.join("empty"), user_path.join("other-empty")] {
-            assert!(empty_file.exists());
-            assert!(!files.contains_key(&empty_file));
-        }
-        assert!(files.contains_key(&user_path.join("non-empty")));
+        // for empty_file in [user_path.join("empty"), user_path.join("other-empty")] {
+        //     assert!(empty_file.exists());
+        //     assert!(!files.contains_key(&empty_file));
+        // }
+        // assert!(files.contains_key(&user_path.join("non-empty")));
+
+        let always_extern = hashset! {
+            user_path.join("empty"), user_path.join("other-empty")
+        };
 
         for (path, file) in files {
             let metadata = fs::symlink_metadata(&path)?;
@@ -77,7 +82,7 @@ fn backup() -> EmptyResult {
             assert_eq!(file.size, metadata.len());
             assert_eq!(file.fingerprint, Fingerprint::new(&metadata));
 
-            if pass % backups_per_group == 0 || path == mutable_file_path {
+            if pass % backups_per_group == 0 && !always_extern.contains(&path) || path == mutable_file_path {
                 assert!(file.unique, "{:?} is not unique", path);
             } else {
                 assert!(!file.unique, "{:?} is unique", path);

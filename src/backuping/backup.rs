@@ -11,7 +11,7 @@ use tar::Header;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
-use crate::file_reader::FileReader;
+use crate::file_reader::{FileReader, EMPTY_FILE_HASH};
 use crate::hash::Hash;
 use crate::metadata::{MetadataItem, Fingerprint, MetadataWriter};
 use crate::storage::{Storage, StorageRc, BackupGroup, Backup};
@@ -80,11 +80,6 @@ impl BackupInstance {
         let fingerprint = Fingerprint::new(fs_metadata);
         let size = fs_metadata.len();
 
-        if size == 0 {
-            self.data().append_data(&mut header, archive_path, io::empty())?;
-            return Ok(());
-        }
-
         let (hash, size, unique) = if let Some((hash, size)) = self.deduplicate(path, &mut file, &fingerprint, size)? {
             header.set_size(0);
             self.data().append_data(&mut header, archive_path, io::empty())?;
@@ -135,6 +130,11 @@ impl BackupInstance {
     fn deduplicate(
         &mut self, path: &Path, file: &mut File, fingerprint: &Fingerprint, size: u64,
     ) -> GenericResult<Option<(Hash, u64)>> {
+        if size == 0 {
+            debug!("{:?} has zero size.", path);
+            return Ok(Some((EMPTY_FILE_HASH.clone(), size)))
+        }
+
         if let Some(last_state) = self.last_state.as_ref().and_then(|states| states.get(path)) {
             if *fingerprint == last_state.fingerprint {
                 debug!("{:?} hasn't been changed.", path);

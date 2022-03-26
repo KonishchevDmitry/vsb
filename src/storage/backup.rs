@@ -133,7 +133,7 @@ impl Backup {
                 stat.extern_files += 1;
                 stat.extern_size += file.size;
 
-                if !available_hashes.contains(&file.hash) {
+                if file.size != 0 && !available_hashes.contains(&file.hash) {
                     error!(concat!(
                         "{:?} backup on {} is not recoverable: ",
                         "unable to find extern {:?} file in the backup group."
