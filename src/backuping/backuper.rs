@@ -1,86 +1,86 @@
-use std::cell::Cell;
 use std::collections::HashSet;
 use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, FileTypeExt};
 use std::path::{Component, Path, PathBuf};
 
 use itertools::Itertools;
 use log::{debug, warn, error};
 use nix::fcntl::OFlag;
 
-use crate::backuping::backup::BackupInstance;
 use crate::config::{BackupConfig, BackupItemConfig};
-use crate::core::{EmptyResult, GenericResult};
+use crate::core::{EmptyResult, GenericError, GenericResult};
+use crate::util;
 
-pub struct Backuper {
-    items: Vec<BackupItemConfig>,
+use super::BackupInstance;
+
+pub struct Backuper<'a> {
+    items: &'a Vec<BackupItemConfig>,
     backup: BackupInstance,
-    test_mode: bool,
-    // FIXME(konishchev): Drop Cell?
-    result: Cell<Result<(), ()>>,
+
+    roots: Vec<PathBuf>,
+    root_parents: HashSet<PathBuf>,
+    ok: bool,
 }
 
-impl Backuper {
-    pub fn new(config: &BackupConfig, backup: BackupInstance, test_mode: bool) -> GenericResult<Backuper> {
-        let items = config.items.clone().ok_or(
+impl<'a> Backuper<'a> {
+    pub fn new(config: &BackupConfig, backup: BackupInstance) -> GenericResult<Backuper> {
+        let items = config.items.as_ref().ok_or(
             "Backup items aren't configured for the specified backup")?;
-        Ok(Backuper {items, backup, test_mode, result: Cell::new(Ok(()))})
+
+        Ok(Backuper {
+            items, backup,
+            roots: Vec::new(),
+            root_parents: HashSet::new(),
+            ok: true,
+        })
     }
 
-    // FIXME(konishchev): Implement + fsync
-    pub fn run(mut self) -> Result<(), ()> {
-        let mut root_directories = HashSet::new();
-
-        // FIXME(konishchev): Drop clone
-        for item in &self.items.clone() {
-            // FIXME(konishchev): To path?
-            let path = Path::new(&item.path);
-
-            let mut parent = PathBuf::new();
-            for part in path.components().dropping_back(1) {
-                parent.push(part);
-
-                if let Component::RootDir = part {
-                    continue;
-                }
-
-                if !root_directories.contains(&parent) {
-                    // FIXME(konishchev): Ensure only directories, unwraps
-                    let metadata = fs::symlink_metadata(&parent).unwrap();
-                    self.backup.add_directory(&parent, &metadata).map_err(|e| format!(
-                        "Failed to backup {:?}: {}", parent, e)).unwrap();
-                    root_directories.insert(parent.clone());
-                }
+    pub fn run(mut self) -> GenericResult<bool> {
+        for item in self.items {
+            match self.prepare(&item) {
+                Ok(path) => self.backup_path(&path, true)?,
+                Err(err) => self.handle_path_error(Path::new(&item.path), err)?,
             }
-
-            // FIXME(konishchev): unwrap
-            self.backup_path(path, true).unwrap();
         }
 
-        // FIXME(konishchev): unwrap
-        self.backup.finish().unwrap();
+        self.backup.finish()?;
+        Ok(self.ok)
+    }
 
-        self.result.get()
+    fn prepare(&mut self, item: &BackupItemConfig) -> GenericResult<PathBuf> {
+        let path = item.path()?;
+
+        for backup_root in &self.roots {
+            if path.starts_with(backup_root) || backup_root.starts_with(&path) {
+                return Err!("it intersects with previously backed up path");
+            }
+        }
+
+        self.roots.push(path.clone());
+        Ok(path)
     }
 
     fn backup_path(&mut self, path: &Path, top_level: bool) -> EmptyResult {
         debug!("Backing up {:?}...", path);
 
         if let Err(err) = crate::metadata::validate_path(path) {
-            self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));
-            return Ok(());
+            return self.handle_path_error(path, err);
+        }
+
+        if top_level {
+            if !self.backup_parent_directories(path)? {
+                return Ok(());
+            }
         }
 
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(err) => {
-                self.handle_access_error(path, top_level, err, None);
-                return Ok(());
+                return self.handle_access_error(path, top_level, err, None);
             },
         };
 
-        // FIXME(konishchev): Check for hardlinks
         let file_type = metadata.file_type();
 
         if file_type.is_file() {
@@ -89,20 +89,69 @@ impl Backuper {
             self.backup_directory(path, top_level, metadata)?;
         } else if file_type.is_symlink() {
             self.backup_symlink(path, top_level, metadata)?;
+        } else if !top_level && (
+            file_type.is_block_device() || file_type.is_char_device() ||
+            file_type.is_fifo() || file_type.is_socket()
+        ) {
+            warn!("Skipping {:?}: unsupported file type.", path);
         } else {
-            // FIXME(konishchev): Support
-            unimplemented!();
+            return self.handle_path_error(path, "unsupported file type");
         }
 
         Ok(())
+    }
+
+    fn backup_parent_directories(&mut self, path: &Path) -> GenericResult<bool> {
+        let mut parent = PathBuf::new();
+
+        for (index, part) in path.components().dropping_back(1).enumerate() {
+            parent.push(part);
+
+            match part {
+                Component::RootDir if index == 0 => {
+                    continue;
+                },
+                Component::Normal(_) if index != 0 => {
+                },
+                _ => {
+                    self.handle_path_error(path, "invalid path")?;
+                    return Ok(false);
+                },
+            }
+
+            if self.root_parents.contains(&parent) {
+                continue
+            }
+
+            let metadata = match fs::symlink_metadata(&parent) {
+                Ok(metadata) => metadata,
+                Err(err) => {
+                    self.handle_path_error(path, err)?;
+                    return Ok(false);
+                },
+            };
+
+            if !metadata.is_dir() {
+                self.handle_path_error(path, format!(
+                    "{:?} has changed its type during the backup", parent))?;
+                return Ok(false);
+            }
+
+            self.backup.add_directory(&parent, &metadata).map_err(|e| format!(
+                "Failed to backup {:?}: {}", parent, e))?;
+
+            self.root_parents.insert(parent.clone());
+        }
+
+        Ok(true)
     }
 
     fn backup_directory(&mut self, path: &Path, top_level: bool, metadata: Metadata) -> EmptyResult {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
             Err(err) => {
-                self.handle_access_error(path, top_level, err, Some(ErrorKind::NotADirectory));
-                return Ok(());
+                return self.handle_access_error(
+                    path, top_level, err, Some(ErrorKind::NotADirectory));
             },
         };
 
@@ -112,15 +161,16 @@ impl Backuper {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(err) => {
-                    self.handle_access_error(path, top_level, err, None);
-                    return Ok(());
+                    return self.handle_access_error(path, top_level, err, None);
                 },
             };
             names.push(entry.file_name());
         }
 
-        self.backup.add_directory(path, &metadata).map_err(|e| format!(
-            "Failed to backup {:?}: {}", path, e))?;
+        if !top_level || !util::is_root_path(path) {
+            self.backup.add_directory(path, &metadata).map_err(|e| format!(
+                "Failed to backup {:?}: {}", path, e))?;
+        }
 
         for name in names {
             self.backup_path(&path.join(name), false)?;
@@ -136,22 +186,20 @@ impl Backuper {
         let file = match open_options.open(path) {
             Ok(file) => file,
             Err(err) => {
-                self.handle_access_error(path, top_level, err, Some(ErrorKind::FilesystemLoop));
-                return Ok(());
+                return self.handle_access_error(
+                    path, top_level, err, Some(ErrorKind::FilesystemLoop));
             },
         };
 
         let metadata = match file.metadata() {
             Ok(metadata) => metadata,
             Err(err) => {
-                self.handle_access_error(path, top_level, err, None);
-                return Ok(());
+                return self.handle_access_error(path, top_level, err, None);
             },
         };
 
         if !metadata.is_file() {
-            self.handle_type_change(path, top_level);
-            return Ok(());
+            return self.handle_type_change(path, top_level);
         }
 
         let hard_links = metadata.nlink();
@@ -167,8 +215,8 @@ impl Backuper {
         let target = match fs::read_link(path) {
             Ok(target) => target,
             Err(err) => {
-                self.handle_access_error(path, top_level, err, Some(ErrorKind::InvalidInput));
-                return Ok(());
+                return self.handle_access_error(
+                    path, top_level, err, Some(ErrorKind::InvalidInput));
             },
         };
 
@@ -177,69 +225,40 @@ impl Backuper {
     }
 
     fn handle_access_error(
-        &self, path: &Path, top_level: bool, err: io::Error, type_change_kind: Option<ErrorKind>,
-    ) {
+        &mut self, path: &Path, top_level: bool, err: io::Error, type_change_kind: Option<ErrorKind>,
+    ) -> EmptyResult {
         if matches!(type_change_kind, Some(kind) if kind == err.kind()) {
             return self.handle_type_change(path, top_level);
         }
 
         if err.kind() == ErrorKind::NotFound && !top_level {
-            return warn!("Failed to backup {:?}: it was deleted during backing up.", path);
+            warn!("Failed to backup {:?}: it was deleted during backing up.", path);
+            return Ok(());
         }
 
-        self.handle_error(format_args!("Failed to backup {:?}: {}", path, err));
+        self.handle_path_error(path, err)
     }
 
-    fn handle_type_change(&self, path: &Path, top_level: bool) {
+    fn handle_type_change(&mut self, path: &Path, top_level: bool) -> EmptyResult {
         // We can't save format_args!() result to a variable, so have to use closure
-        let handle = |message| {
+        let mut handle = |message| -> EmptyResult {
             if top_level {
-                self.handle_error(message);
+                self.handle_error(message)
             } else {
                 warn!("{}.", message);
+                Ok(())
             }
         };
         handle(format_args!("Skipping {:?}: it changed its type during backing up", path))
     }
 
-    fn handle_error(&self, message: std::fmt::Arguments) {
-        // FIXME(konishchev): Return error instead?
-        if self.test_mode {
-            panic!("{}", message);
-        }
+    fn handle_path_error<E: Into<GenericError>>(&mut self, path: &Path, err: E) -> EmptyResult {
+        self.handle_error(format_args!("Failed to backup {:?}: {}", path, err.into()))
+    }
+
+    fn handle_error(&mut self, message: std::fmt::Arguments) -> EmptyResult {
         error!("{}.", message);
-        self.result.set(Err(()));
+        self.ok = false;
+        Ok(())
     }
 }
-
-// FIXME(konishchev): Implement
-/*
-    def __backup_path(self, path, filters, toplevel):
-        try:
-            elif stat.S_ISSOCK(stat_info.st_mode):
-                LOG.info("Skip UNIX socket - '%s'.", path)
-            else:
-                self.__backup.add_file(
-                    path, stat_info, link_target = link_target)
-
-            if stat.S_ISDIR(stat_info.st_mode):
-                prefix = toplevel + os.path.sep
-
-                for filename in os.listdir(path):
-                    file_path = os.path.join(path, filename)
-
-                    for allow, regex in filters:
-                        if not file_path.startswith(prefix):
-                            raise LogicalError()
-
-                        if regex.search(file_path[len(prefix):]):
-                            if allow:
-                                self.__backup_path(file_path, filters, toplevel)
-                            else:
-                                LOG.info("Filtering out '%s'...", file_path)
-
-                            break
-                    else:
-                        self.__backup_path(file_path, filters, toplevel)
-
- */

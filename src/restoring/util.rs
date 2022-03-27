@@ -4,6 +4,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf, Component};
 
 use crate::core::{EmptyResult, GenericResult};
+use crate::util;
 
 pub fn get_file_path_from_tar_path<P: AsRef<Path>>(tar_path: P) -> GenericResult<PathBuf> {
     let tar_path = tar_path.as_ref();
@@ -76,7 +77,7 @@ pub fn restore_directories<R, P>(restore_dir: R, file_path: P) -> GenericResult<
         path = path.parent().ok_or_else(|| format!(
             "Invalid restoring file path: {:?}", file_path.as_ref()))?;
 
-        if path == Path::new("/") {
+        if util::is_root_path(path) {
             break;
         }
 

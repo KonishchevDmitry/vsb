@@ -1,7 +1,7 @@
 use std::io;
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use std::path::{Path, Component};
 use std::thread;
 use std::time::{self, Duration};
 
@@ -12,6 +12,11 @@ use nix::fcntl::OFlag;
 use nix::{sys, unistd};
 
 use crate::core::{EmptyResult, GenericResult};
+
+pub fn is_root_path(path: &Path) -> bool {
+    let mut components = path.components();
+    components.next() == Some(Component::RootDir) && components.next().is_none()
+}
 
 pub fn fsync_directory(path: &Path) -> io::Result<()> {
     let mut open_options = OpenOptions::new();

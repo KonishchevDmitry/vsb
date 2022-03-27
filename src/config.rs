@@ -8,10 +8,11 @@ use std::time::Duration;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::de::{self, Deserializer, Visitor};
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::Deserialize;
 use validator::Validate;
 
 use crate::core::GenericResult;
+pub use crate::backuping::BackupItemConfig;
 
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
@@ -31,7 +32,6 @@ pub struct BackupConfig {
     #[validate(length(min = 1))]
     pub name: String,
     pub path: String,
-    #[validate]
     #[validate(length(min = 1))]
     pub items: Option<Vec<BackupItemConfig>>,
 
@@ -41,14 +41,6 @@ pub struct BackupConfig {
     // FIXME(konishchev): Rewrite
     #[validate]
     pub upload: Option<UploadConfig>,
-}
-
-// FIXME(konishchev): Validate
-#[derive(Clone, Serialize, Deserialize, Validate)]
-#[serde(deny_unknown_fields)]
-pub struct BackupItemConfig {
-    // FIXME(konishchev): Expand home + check duplicates
-    pub path: String,
 }
 
 #[derive(Deserialize, Validate)]

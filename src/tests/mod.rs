@@ -53,8 +53,8 @@ fn backup() -> EmptyResult {
         let (backup, ok) = BackupInstance::create(&backup_config, storage.clone())?;
         assert!(ok);
 
-        let backuper = Backuper::new(&backup_config, backup, true)?;
-        assert!(backuper.run().is_ok());
+        let backuper = Backuper::new(&backup_config, backup)?;
+        assert!(backuper.run()?);
 
         let (groups, ok) = storage.get_backup_groups(true)?;
         assert!(ok);
