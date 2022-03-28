@@ -13,7 +13,7 @@ pub struct UsersCache {
 
 impl UsersCache {
     pub fn new() -> UsersCache {
-        return Default::default()
+        Default::default()
     }
 
     pub fn get_uid(&self, name: &str) -> GenericResult<Option<u32>> {

@@ -98,11 +98,12 @@ impl Fingerprint {
 
 pub fn validate_path(path: &Path) -> GenericResult<&str> {
     Ok(path.to_str().and_then(|path: &str| {
-        if path.contains('\n') {
-            None
-        } else {
-            Some(path)
+        for byte in path.bytes() {
+            if byte == b'\r' || byte == b'\n' {
+                return None;
+            }
         }
+        Some(path)
     }).ok_or("invalid path")?)
 }
 

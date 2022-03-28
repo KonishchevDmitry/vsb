@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{App, Arg, ArgMatches, AppSettings, SubCommand};
 
 use crate::core::GenericResult;
@@ -46,6 +48,15 @@ impl<'a> Parser<'a> {
                     .help("Backup name")
                     .required(true)))
 
+            .subcommand(SubCommand::with_name("restore")
+                .about("Restore the specified backup")
+                .arg(Arg::with_name("BACKUP_PATH")
+                    .help("Backup path")
+                    .required(true))
+                .arg(Arg::with_name("RESTORE_PATH")
+                    .help("Path to restore the backup to")
+                    .required(true)))
+
             .subcommand(SubCommand::with_name("upload")
                 .about("Upload backups to cloud"))
 
@@ -75,6 +86,11 @@ impl<'a> Parser<'a> {
         Ok(match command {
             "backup" => Action::Backup {
                 name: matches.value_of("NAME").unwrap().to_owned(),
+            },
+
+            "restore" => Action::Restore {
+                backup_path: PathBuf::from(matches.value_of("BACKUP_PATH").unwrap()),
+                restore_path: PathBuf::from(matches.value_of("RESTORE_PATH").unwrap()),
             },
 
             "upload" => Action::Upload,

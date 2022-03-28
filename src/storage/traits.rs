@@ -4,26 +4,26 @@ use regex::{self, Regex};
 
 use crate::provider::{ProviderType, FileType};
 
-const DAY_PRECISION_NAME_FORMAT: &'static str = "%Y.%m.%d";
-const DAY_PRECISION_NAME_REGEX: &'static str = r"\d{4}\.\d{2}\.\d{2}";
+const DAY_PRECISION_NAME_FORMAT: &str = "%Y.%m.%d";
+const DAY_PRECISION_NAME_REGEX: &str = r"\d{4}\.\d{2}\.\d{2}";
 
-const SECOND_PRECISION_NAME_FORMAT: &'static str = concatcp!(DAY_PRECISION_NAME_FORMAT, "-%H:%M:%S");
-const SECOND_PRECISION_NAME_REGEX: &'static str = concatcp!(DAY_PRECISION_NAME_REGEX, r"-\d{2}:\d{2}:\d{2}");
+const SECOND_PRECISION_NAME_FORMAT: &str = concatcp!(DAY_PRECISION_NAME_FORMAT, "-%H:%M:%S");
+const SECOND_PRECISION_NAME_REGEX: &str = concatcp!(DAY_PRECISION_NAME_REGEX, r"-\d{2}:\d{2}:\d{2}");
 
-#[cfg(test)] const HIGH_PRECISION_NAME_FORMAT: &'static str = concatcp!(SECOND_PRECISION_NAME_FORMAT, ".%3f");
-#[cfg(test)] const HIGH_PRECISION_NAME_REGEX: &'static str = concatcp!(SECOND_PRECISION_NAME_REGEX, r"\.\d{3}");
+#[cfg(test)] const HIGH_PRECISION_NAME_FORMAT: &str = concatcp!(SECOND_PRECISION_NAME_FORMAT, ".%3f");
+#[cfg(test)] const HIGH_PRECISION_NAME_REGEX: &str = concatcp!(SECOND_PRECISION_NAME_REGEX, r"\.\d{3}");
 
-#[cfg(not(test))] const GROUP_NAME_FORMAT: &'static str = DAY_PRECISION_NAME_FORMAT;
-#[cfg(test)] const GROUP_NAME_FORMAT: &'static str = HIGH_PRECISION_NAME_FORMAT;
+#[cfg(not(test))] const GROUP_NAME_FORMAT: &str = DAY_PRECISION_NAME_FORMAT;
+#[cfg(test)] const GROUP_NAME_FORMAT: &str = HIGH_PRECISION_NAME_FORMAT;
 
-#[cfg(not(test))] const GROUP_NAME_REGEX: &'static str = DAY_PRECISION_NAME_REGEX;
-#[cfg(test)] const GROUP_NAME_REGEX: &'static str = HIGH_PRECISION_NAME_REGEX;
+#[cfg(not(test))] const GROUP_NAME_REGEX: &str = DAY_PRECISION_NAME_REGEX;
+#[cfg(test)] const GROUP_NAME_REGEX: &str = HIGH_PRECISION_NAME_REGEX;
 
-#[cfg(not(test))] const BACKUP_NAME_FORMAT: &'static str = SECOND_PRECISION_NAME_FORMAT;
-#[cfg(test)] const BACKUP_NAME_FORMAT: &'static str = HIGH_PRECISION_NAME_FORMAT;
+#[cfg(not(test))] const BACKUP_NAME_FORMAT: &str = SECOND_PRECISION_NAME_FORMAT;
+#[cfg(test)] const BACKUP_NAME_FORMAT: &str = HIGH_PRECISION_NAME_FORMAT;
 
-#[cfg(not(test))] const BACKUP_NAME_REGEX: &'static str = SECOND_PRECISION_NAME_REGEX;
-#[cfg(test)] const BACKUP_NAME_REGEX: &'static str = HIGH_PRECISION_NAME_REGEX;
+#[cfg(not(test))] const BACKUP_NAME_REGEX: &str = SECOND_PRECISION_NAME_REGEX;
+#[cfg(test)] const BACKUP_NAME_REGEX: &str = HIGH_PRECISION_NAME_REGEX;
 
 pub struct BackupTraits {
     pub file_type: FileType,

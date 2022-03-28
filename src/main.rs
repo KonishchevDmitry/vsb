@@ -1,8 +1,3 @@
-// FIXME(konishchev): Drop
-#![feature(exit_status_error)]
-#![feature(io_error_more)]
-#![feature(unix_chown)]
-
 // FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
 mod backuping;
@@ -67,6 +62,7 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
 
     match parser.parse()? {
         Action::Backup {name} => backuping::backup(config.get_backup(&name)?),
+        Action::Restore {backup_path, restore_path} => restoring::restore(&backup_path, &restore_path),
         Action::Upload => uploader::upload(&config),
     }
 }

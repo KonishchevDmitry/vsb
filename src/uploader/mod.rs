@@ -46,8 +46,9 @@ fn acquire_lock(config_path: &str) -> GenericResult<File> {
     fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|e| {
         if e == Errno::EAGAIN {
             format!(concat!(
-            "Unable to exclusively run the program for {:?} configuration file: ",
-            "it's already locked by another process"), config_path)
+                "Unable to exclusively run the program for {:?} configuration file: ",
+                "it's already locked by another process",
+            ), config_path)
         } else {
             format!("Unable to flock() {:?}: {}", config_path, e)
         }

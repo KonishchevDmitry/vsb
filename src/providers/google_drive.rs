@@ -281,9 +281,8 @@ impl ReadProvider for GoogleDrive {
         }
 
         let mut files = Vec::new();
-        let mut children = self.list_children(&file.id)?;
 
-        for (name, mut children) in children.drain() {
+        for (name, children) in self.list_children(&file.id)? {
             if name.is_empty() || name == "." || name == ".." || name.contains('/') {
                 return Err!("{:?} directory contains a file with an invalid name: {:?}",
                             path, file.name)
@@ -294,7 +293,7 @@ impl ReadProvider for GoogleDrive {
                             path, children.len(), name);
             }
 
-            files.extend(children.drain(..).map(|file| File {
+            files.extend(children.into_iter().map(|file| File {
                 type_: file.type_(),
                 name: file.name,
                 size: None,

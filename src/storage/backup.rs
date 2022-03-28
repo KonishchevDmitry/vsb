@@ -54,7 +54,7 @@ impl Backup {
 
         let backup_files: HashMap<String, Option<u64>> = provider.list_directory(path)?
             .ok_or("The backup doesn't exist")?
-            .drain(..)
+            .into_iter()
             .filter(|file| file.type_ == FileType::File)
             .map(|file| (file.name, file.size))
             .collect();

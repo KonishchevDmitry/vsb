@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use itertools::Itertools;
 use log::{debug, warn, error};
+use nix::errno::Errno;
 use nix::fcntl::OFlag;
 
 use crate::config::{BackupConfig, BackupItemConfig};
@@ -38,7 +39,7 @@ impl<'a> Backuper<'a> {
 
     pub fn run(mut self) -> GenericResult<bool> {
         for item in self.items {
-            match self.prepare(&item) {
+            match self.prepare(item) {
                 Ok(path) => self.backup_path(&path, true)?,
                 Err(err) => self.handle_path_error(Path::new(&item.path), err)?,
             }
@@ -68,10 +69,8 @@ impl<'a> Backuper<'a> {
             return self.handle_path_error(path, err);
         }
 
-        if top_level {
-            if !self.backup_parent_directories(path)? {
-                return Ok(());
-            }
+        if top_level && !self.backup_parent_directories(path)? {
+            return Ok(());
         }
 
         let metadata = match fs::symlink_metadata(path) {
@@ -150,8 +149,7 @@ impl<'a> Backuper<'a> {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
             Err(err) => {
-                return self.handle_access_error(
-                    path, top_level, err, Some(ErrorKind::NotADirectory));
+                return self.handle_access_error(path, top_level, err, Some(Errno::ENOTDIR));
             },
         };
 
@@ -191,8 +189,7 @@ impl<'a> Backuper<'a> {
         let file = match open_options.open(path) {
             Ok(file) => file,
             Err(err) => {
-                return self.handle_access_error(
-                    path, top_level, err, Some(ErrorKind::FilesystemLoop));
+                return self.handle_access_error(path, top_level, err, Some(Errno::ELOOP));
             },
         };
 
@@ -220,8 +217,7 @@ impl<'a> Backuper<'a> {
         let target = match fs::read_link(path) {
             Ok(target) => target,
             Err(err) => {
-                return self.handle_access_error(
-                    path, top_level, err, Some(ErrorKind::InvalidInput));
+                return self.handle_access_error(path, top_level, err, Some(Errno::EINVAL));
             },
         };
 
@@ -230,10 +226,12 @@ impl<'a> Backuper<'a> {
     }
 
     fn handle_access_error(
-        &mut self, path: &Path, top_level: bool, err: io::Error, type_change_kind: Option<ErrorKind>,
+        &mut self, path: &Path, top_level: bool, err: io::Error, type_change_errno: Option<Errno>,
     ) -> EmptyResult {
-        if matches!(type_change_kind, Some(kind) if kind == err.kind()) {
-            return self.handle_type_change(path, top_level);
+        if let (Some(type_change_errno), Some(errno)) = (type_change_errno, err.raw_os_error()) {
+            if Errno::from_i32(errno) == type_change_errno {
+                return self.handle_type_change(path, top_level);
+            }
         }
 
         if err.kind() == ErrorKind::NotFound && !top_level {

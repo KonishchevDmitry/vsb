@@ -177,7 +177,7 @@ fn backup() -> EmptyResult {
             info!("Restore #{} pass...", restore_pass);
             let restore_dir = temp_dir.join("restore");
 
-            let restorer = Restorer::new(&Path::new(&backup.path))?;
+            let restorer = Restorer::new(Path::new(&backup.path))?;
             assert!(restorer.restore(&restore_dir)?);
 
             for file_state in &mutable_files_states[restore_pass] {
@@ -216,7 +216,7 @@ impl RestoreGitFiles {
     }
 
     fn restore(&mut self) -> EmptyResult {
-        run(["git", "checkout", self.0.to_str().unwrap()])
+        run(["git", "checkout", "--quiet", self.0.to_str().unwrap()])
     }
 }
 
@@ -252,7 +252,13 @@ impl FileState {
 
 fn run<C: IntoIterator<Item=A>, A: AsRef<OsStr>>(command: C) -> EmptyResult {
     let mut command = command.into_iter();
-    Ok(Command::new(command.next().unwrap()).args(command).status()?.exit_ok()?)
+
+    let status = Command::new(command.next().unwrap()).args(command).status()?;
+    if !status.success() {
+        return Err!("{}", status);
+    }
+
+    Ok(())
 }
 
 fn shell(command: &str) -> EmptyResult {
