@@ -172,6 +172,11 @@ impl<'a> Backuper<'a> {
                 "Failed to backup {:?}: {}", path, e))?;
         }
 
+        // To make tests predictable
+        if cfg!(debug_assertions) {
+            names.sort();
+        }
+
         for name in names {
             self.backup_path(&path.join(name), false)?;
         }

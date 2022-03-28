@@ -75,6 +75,9 @@ impl RestorePlan {
 
                 for file in backup.read_metadata(provider).map_err(map_read_error)? {
                     let file = file.map_err(map_read_error)?;
+                    if !file.unique {
+                        continue;
+                    }
 
                     if let Some(paths) = to_find.remove(&file.hash) {
                         extern_files.extend(paths.iter().cloned());

@@ -10,6 +10,7 @@ use std::io::{self, Read};
 use std::os::unix::{self, fs::OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
+use easy_logging::GlobalContext;
 use itertools::Itertools;
 use log::{error, info};
 use tar::{Entry, EntryType, Header};
@@ -92,6 +93,7 @@ impl Restorer {
         util::create_directory(restore_dir)?;
 
         for (index, step) in plan.steps.iter().enumerate() {
+            let _context = GlobalContext::new(&step.backup.name);
             ok &= self.process_step(step, index == 0, restore_dir).map_err(|e| format!(
                 "Failed to restore {:?} backup: {}", step.backup.path, e))?;
         }
@@ -194,14 +196,10 @@ impl Restorer {
         for path in &info.paths {
             let restore_path = get_restore_path(restore_dir, path)?;
 
-            files.push(OpenOptions::new()
-                .create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).write(true)
-                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
-
             if is_target {
                 if path == source_path {
                     let metadata = self.get_file_metadata(entry.header())?;
-                    assert!(restore_metadata.replace((restore_path, metadata)).is_none());
+                    assert!(restore_metadata.replace((restore_path.clone(), metadata)).is_none());
                 } else {
                     self.pre_created_directories.extend(util::restore_directories(restore_dir, path)?);
                     self.restored_extern_files.insert(self.pending_extern_files.take(path).unwrap());
@@ -209,6 +207,10 @@ impl Restorer {
             } else {
                 self.restored_extern_files.insert(self.pending_extern_files.take(path).unwrap());
             }
+
+            files.push(OpenOptions::new()
+                .create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).write(true)
+                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
         }
 
         let mut files = MultiWriter::new(files);
