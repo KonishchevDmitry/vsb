@@ -19,7 +19,6 @@ itertools = "*"
 lazy_static = "1.4.0"
 libc = "0.2.112"
 log = "0.4.14"
-maplit = "*"
 md-5 = "0.10.0"
 mime = "0.3.16"
 nix = "0.23.1"
@@ -39,4 +38,5 @@ validator = { version = "0.14.0", features = ["derive"] }
 
 [dev-dependencies]
 assert_fs = "1.0.6"
+maplit = "*"
 rand = "0.8.4"
