@@ -35,6 +35,8 @@ main() {
     check --bins "$blacklist"
     check '--bins --release' "$blacklist"
     check --tests "$blacklist"
+
+    cargo test
 }
 
 main
