@@ -1,13 +1,15 @@
 use std::path::PathBuf;
 
-use clap::{App, Arg, ArgMatches, AppSettings, SubCommand};
+use clap::{AppSettings, Command, Arg, ArgMatches};
+use const_format::formatcp;
+use indoc::indoc;
 
 use crate::core::GenericResult;
 
 use super::Action;
 
-pub struct Parser<'a> {
-    matches: ArgMatches<'a>,
+pub struct Parser {
+    matches: Option<ArgMatches>,
 }
 
 pub struct GlobalOptions {
@@ -15,73 +17,82 @@ pub struct GlobalOptions {
     pub config_path: String,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new() -> Parser<'a> {
-        // Box is used to guarantee that Parser's memory won't be moved to preserve ArgMatches
-        // lifetime requirements.
-        Parser {
-            matches: ArgMatches::new(),
-        }
+impl Parser {
+    pub fn new() -> Parser {
+        Parser {matches: None}
     }
 
     pub fn parse_global(&mut self) -> GenericResult<GlobalOptions> {
-        let default_config_path = "~/.vsb.yaml";
-        self.matches = App::new("Very Simple Backup")
-            .about("\nVery simple in configuring but powerful backup tool")
+        const DEFAULT_CONFIG_PATH: &str = "~/.vsb.yaml";
 
-            .arg(Arg::with_name("config")
-                .short("c")
+        let matches = new_command("vsb", "Very Simple Backup")
+            .version(env!("CARGO_PKG_VERSION"))
+
+            .subcommand_required(true)
+            .arg_required_else_help(true)
+            .disable_help_subcommand(true)
+
+            .global_setting(AppSettings::DeriveDisplayOrder)
+            .dont_collapse_args_in_usage(true)
+            .help_expected(true)
+
+            .arg(Arg::new("config")
+                .short('c')
                 .long("config")
                 .value_name("PATH")
                 .takes_value(true)
-                .help(&format!("Configuration file path [default: {}]", default_config_path)))
+                .help(formatcp!("Configuration file path [default: {}]", DEFAULT_CONFIG_PATH)))
 
-            .arg(Arg::with_name("verbose")
-                .short("v")
-                .long("verbose")
-                .multiple(true)
-                .help("Sets verbosity level"))
+            .arg(Arg::new("cron")
+                .long("cron")
+                .help("Show only warning and error messages (intended to be used from cron)"))
 
-            .subcommand(SubCommand::with_name("backup")
-                .about("Run backup process for the specified backup name")
-                .arg(Arg::with_name("NAME")
+            .arg(Arg::new("verbose")
+                .short('v').long("verbose")
+                .conflicts_with("cron")
+                .multiple_occurrences(true)
+                .max_occurrences(2)
+                .help("Set verbosity level"))
+
+            .subcommand(new_command(
+                "backup", "Run backup process for the specified backup name")
+                .arg(Arg::new("NAME")
                     .help("Backup name")
                     .required(true)))
 
-            .subcommand(SubCommand::with_name("restore")
-                .about("Restore the specified backup")
-                .arg(Arg::with_name("BACKUP_PATH")
+            .subcommand(new_command(
+                "restore", "Restore the specified backup")
+                .arg(Arg::new("BACKUP_PATH")
                     .help("Backup path")
                     .required(true))
-                .arg(Arg::with_name("RESTORE_PATH")
+                .arg(Arg::new("RESTORE_PATH")
                     .help("Path to restore the backup to")
                     .required(true)))
 
-            .subcommand(SubCommand::with_name("upload")
-                .about("Upload backups to cloud"))
-
-            .global_setting(AppSettings::DisableVersion)
-            .global_setting(AppSettings::DisableHelpSubcommand)
-            .global_setting(AppSettings::DeriveDisplayOrder)
-            .setting(AppSettings::SubcommandRequiredElseHelp)
+            .subcommand(new_command("upload", "Upload backups to cloud"))
             .get_matches();
 
-        let log_level = match self.matches.occurrences_of("verbose") {
-            0 => log::Level::Info,
+        let log_level = match matches.occurrences_of("verbose") {
+            0 => if matches.is_present("cron") {
+                log::Level::Warn
+            } else {
+                log::Level::Info
+            },
             1 => log::Level::Debug,
             2 => log::Level::Trace,
             _ => return Err!("Invalid verbosity level"),
         };
 
-        let config_path = self.matches.value_of("config").map(ToString::to_string).unwrap_or_else(||
-            shellexpand::tilde(default_config_path).to_string());
+        let config_path = matches.value_of("config").map(ToString::to_string).unwrap_or_else(||
+            shellexpand::tilde(DEFAULT_CONFIG_PATH).to_string());
+
+        self.matches.replace(matches);
 
         Ok(GlobalOptions {log_level, config_path})
     }
 
     pub fn parse(self) -> GenericResult<Action> {
-        let (command, matches) = self.matches.subcommand();
-        let matches = matches.unwrap();
+        let (command, matches) = self.matches.as_ref().unwrap().subcommand().unwrap();
 
         Ok(match command {
             "backup" => Action::Backup {
@@ -98,4 +109,18 @@ impl<'a> Parser<'a> {
             _ => unreachable!(),
         })
     }
+}
+
+fn new_command<'help>(name: &str, about: &'help str) -> Command<'help> {
+    Command::new(name)
+        // Default template contains `{bin} {version}` for some reason
+        .help_template(indoc!("
+            {before-help}{about}
+
+            {usage-heading}
+                {usage}
+
+            {all-args}{after-help}\
+        "))
+        .about(about)
 }
