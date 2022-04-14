@@ -86,7 +86,7 @@ fn check_backup_groups(local_groups: &[BackupGroup], cloud_groups: &[BackupGroup
 
     if local_groups_num < 2 && cloud_groups_num > local_groups_num {
         return Err!(
-            "A possible backup corruption: Cloud contains more backup groups than stored locally.")
+            "A possible backup corruption: Cloud contains more backup groups than stored locally")
     }
 
     Ok(())
