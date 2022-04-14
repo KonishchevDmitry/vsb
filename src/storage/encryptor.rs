@@ -12,9 +12,9 @@ use log::{debug, error};
 use nix::{fcntl, unistd};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::{Hasher, Hash};
-use crate::stream_splitter::{DataSender, DataReceiver, Data};
 use crate::util;
+use crate::util::hash::{Hasher, Hash};
+use crate::util::stream_splitter::{DataSender, DataReceiver, Data};
 
 pub struct Encryptor {
     pid: pid_t,
@@ -51,7 +51,7 @@ impl Encryptor {
         let stdin = BufWriter::new(gpg.stdin.take().unwrap());
         let encrypted_chunks_tx = tx.clone();
 
-        let stdout_reader = util::spawn_thread("gpg stdout reader", move || {
+        let stdout_reader = util::sys::spawn_thread("gpg stdout reader", move || {
             stdout_reader(gpg, hasher, tx)
         }).map_err(|e| {
             terminate_gpg(pid);
@@ -99,7 +99,7 @@ impl Encryptor {
         if let Some(stdout_reader) = self.stdout_reader.take() {
             let tx = self.encrypted_data_tx.take().unwrap();
 
-            let message = match util::join_thread(stdout_reader) {
+            let message = match util::sys::join_thread(stdout_reader) {
                 Ok(checksum) => {
                     match result {
                         Ok(_) => Ok(Data::EofWithChecksum(checksum)),
@@ -181,7 +181,7 @@ fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> Gen
     let stdout = BufReader::new(gpg.stdout.take().unwrap());
     let mut stderr = gpg.stderr.take().unwrap();
 
-    let mut stderr_reader = Some(util::spawn_thread("gpg stderr reader", move || -> EmptyResult {
+    let mut stderr_reader = Some(util::sys::spawn_thread("gpg stderr reader", move || -> EmptyResult {
         let mut error = String::new();
 
         match stderr.read_to_string(&mut error) {
@@ -198,11 +198,11 @@ fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> Gen
 
     let hash = read_data(stdout, hasher, tx).map_err(|err| {
         terminate_gpg(gpg.id() as i32); // To close gpg's stderr
-        util::join_thread_ignoring_result(stderr_reader.take().unwrap());
+        util::sys::join_thread_ignoring_result(stderr_reader.take().unwrap());
         err
     })?;
 
-    util::join_thread(stderr_reader.take().unwrap())?;
+    util::sys::join_thread(stderr_reader.take().unwrap())?;
 
     let status = gpg.wait().map_err(|e| format!("Failed to wait() a child gpg process: {}", e))?;
     if !status.success() {
@@ -239,7 +239,7 @@ fn read_data(mut stdout: BufReader<ChildStdout>, mut hasher: Box<dyn Hasher>, tx
 
 fn terminate_gpg(pid: pid_t) {
     let termination_timeout = time::Duration::from_secs(3);
-    if let Err(err) = util::terminate_process("a child gpg process", pid, termination_timeout) {
+    if let Err(err) = util::sys::terminate_process("a child gpg process", pid, termination_timeout) {
         error!("{}.", err)
     }
 }

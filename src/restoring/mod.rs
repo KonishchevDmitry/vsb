@@ -2,6 +2,7 @@ mod file_metadata;
 mod multi_writer;
 mod plan;
 mod restorer;
+mod users;
 mod util;
 
 use std::path::Path;

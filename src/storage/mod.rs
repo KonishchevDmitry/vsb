@@ -1,6 +1,8 @@
 mod adapters;
 mod backup;
 mod backup_group;
+mod encryptor;
+pub mod metadata;
 mod traits;
 
 use std::rc::Rc;
@@ -11,12 +13,11 @@ use log::info;
 use rayon::prelude::*;
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::encryptor::Encryptor;
-use crate::provider::{FileType, ReadProvider, WriteProvider};
-use crate::stream_splitter;
-use crate::util;
+use crate::providers::{FileType, ReadProvider, WriteProvider};
+use crate::util::{self, stream_splitter};
 
 use self::adapters::{AbstractProvider, ReadOnlyProviderAdapter, ReadWriteProviderAdapter};
+use self::encryptor::Encryptor;
 
 pub use self::backup::Backup;
 pub use self::backup_group::BackupGroup;
@@ -138,12 +139,12 @@ impl Storage {
         let (chunk_streams, splitter_thread) = stream_splitter::split(
             data_stream, provider.max_request_size())?;
 
-        let archive_thread = match util::spawn_thread("backup archiver", move || {
+        let archive_thread = match util::sys::spawn_thread("backup archiver", move || {
             archive_backup(&backup_name, &local_backup_path, encryptor)
         }) {
             Ok(handle) => handle,
             Err(err) => {
-                util::join_thread_ignoring_result(splitter_thread);
+                util::sys::join_thread_ignoring_result(splitter_thread);
                 return Err(err);
             }
         };
@@ -151,10 +152,10 @@ impl Storage {
         let upload_result = provider.upload_file(
             &group_path, &temp_file_name, &file_name, chunk_streams);
 
-        let archive_result = util::join_thread(archive_thread).map_err(|e| format!(
+        let archive_result = util::sys::join_thread(archive_thread).map_err(|e| format!(
             "Archive operation has failed: {}", e));
 
-        let splitter_result = util::join_thread(splitter_thread);
+        let splitter_result = util::sys::join_thread(splitter_thread);
 
         // The real error should always be here, but...
         upload_result?;

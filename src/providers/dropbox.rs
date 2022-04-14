@@ -8,13 +8,14 @@ use serde::{ser, de};
 use serde_derive::{Serialize, Deserialize};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::{Hasher, ChunkedSha256};
 use crate::http_client::{
     HttpClient, HttpRequest, HttpRequestBuildingError, Method, Body, EmptyResponse, HttpClientError,
 };
-use crate::oauth::OauthClient;
-use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
+use crate::util::hash::{Hasher, ChunkedSha256};
+use crate::util::stream_splitter::{ChunkStreamReceiver, ChunkStream};
+
+use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use super::oauth::OauthClient;
 
 const OAUTH_ENDPOINT: &str = "https://www.dropbox.com/oauth2";
 

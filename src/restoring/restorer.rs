@@ -11,14 +11,14 @@ use log::{error, info};
 use tar::{Entry, EntryType, Header};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::file_reader::FileReader;
 use crate::providers::filesystem::Filesystem;
 use crate::storage::{Storage, StorageRc};
-use crate::users::UsersCache;
+use crate::util::file_reader::FileReader;
 
 use super::file_metadata::{FileMetadata, Owner};
 use super::multi_writer::MultiWriter;
 use super::plan::{RestorePlan, RestoreStep, RestoringFile};
+use super::users::UsersCache;
 use super::util::{self, get_restore_path};
 
 pub struct Restorer {

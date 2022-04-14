@@ -6,8 +6,7 @@ use std::thread::JoinHandle;
 use bytes::Bytes;
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::Hash;
-use crate::util;
+use crate::util::{self, hash::Hash};
 
 pub enum Data {
     Payload(Bytes),
@@ -33,7 +32,7 @@ pub fn split(data_stream: DataReceiver, stream_max_size: Option<u64>)
 {
     let (streams_tx, streams_rx) = mpsc::sync_channel(0);
 
-    let splitter_thread = util::spawn_thread("stream splitter", move || {
+    let splitter_thread = util::sys::spawn_thread("stream splitter", move || {
         Ok(splitter(data_stream, streams_tx, stream_max_size)?)
     })?;
 

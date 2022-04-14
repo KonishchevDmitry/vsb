@@ -1,5 +1,5 @@
 use crate::core::GenericResult;
-use crate::provider::{ReadProvider, WriteProvider};
+use crate::providers::{ReadProvider, WriteProvider};
 
 // Rust don't have trait upcasting yet (https://github.com/rust-lang/rust/issues/5665), so we have
 // to emulate it via this trait.

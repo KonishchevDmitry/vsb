@@ -2,9 +2,10 @@ use std::fs;
 use std::io;
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::Hasher;
-use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use crate::stream_splitter::ChunkStreamReceiver;
+use crate::util::hash::Hasher;
+use crate::util::stream_splitter::ChunkStreamReceiver;
+
+use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 
 pub struct Filesystem {
 }

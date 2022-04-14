@@ -11,11 +11,10 @@ use tar::Header;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
-use crate::file_reader::{FileReader, EMPTY_FILE_HASH};
-use crate::hash::Hash;
-use crate::metadata::{MetadataItem, Fingerprint, MetadataWriter};
 use crate::storage::{Storage, StorageRc, BackupGroup, Backup};
-use crate::util;
+use crate::storage::metadata::{MetadataItem, Fingerprint, MetadataWriter};
+use crate::util::{self, hash::Hash};
+use crate::util::file_reader::{FileReader, EMPTY_FILE_HASH};
 
 type Archive = tar::Builder<BufWriter<BzEncoder<File>>>;
 
@@ -119,10 +118,10 @@ impl BackupInstance {
         let temp_path = self.temp_path.clone().unwrap();
         let parent_path = temp_path.parent().unwrap();
 
-        util::fsync_directory(&temp_path)?;
+        util::sys::fsync_directory(&temp_path)?;
         fs::rename(&temp_path, &self.path)?;
         self.temp_path = None;
-        util::fsync_directory(parent_path)?;
+        util::sys::fsync_directory(parent_path)?;
 
         Ok(())
     }

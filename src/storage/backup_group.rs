@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use log::error;
 
 use crate::core::GenericResult;
-use crate::provider::{ReadProvider, FileType};
+use crate::providers::{ReadProvider, FileType};
 
 use super::backup::Backup;
 use super::traits::BackupTraits;

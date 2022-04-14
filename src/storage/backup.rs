@@ -6,10 +6,9 @@ use log::error;
 use tar::Archive;
 
 use crate::core::GenericResult;
-use crate::hash::Hash;
-use crate::metadata::MetadataReader;
-use crate::provider::{ReadProvider, FileType};
-
+use crate::providers::{ReadProvider, FileType};
+use crate::storage::metadata::MetadataReader;
+use crate::util::hash::Hash;
 
 pub struct Backup {
     pub path: String,

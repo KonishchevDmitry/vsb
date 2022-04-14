@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use log::error;
 
 use crate::core::{GenericError, GenericResult};
-use crate::hash::Hash;
 use crate::storage::{Storage, Backup};
+use crate::util::hash::Hash;
 
 pub struct RestorePlan {
     pub steps: Vec<RestoreStep>,

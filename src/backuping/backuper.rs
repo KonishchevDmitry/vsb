@@ -65,7 +65,7 @@ impl<'a> Backuper<'a> {
     fn backup_path(&mut self, path: &Path, top_level: bool) -> EmptyResult {
         debug!("Backing up {:?}...", path);
 
-        if let Err(err) = crate::metadata::validate_path(path) {
+        if let Err(err) = crate::storage::metadata::validate_path(path) {
             return self.handle_path_error(path, err);
         }
 
@@ -165,7 +165,7 @@ impl<'a> Backuper<'a> {
             names.push(entry.file_name());
         }
 
-        if !top_level || !util::is_root_path(path) {
+        if !top_level || !util::sys::is_root_path(path) {
             self.backup.add_directory(path, &metadata).map_err(|e| format!(
                 "Failed to backup {:?}: {}", path, e))?;
         }

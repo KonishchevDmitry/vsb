@@ -77,7 +77,7 @@ pub fn restore_directories<R, P>(restore_dir: R, file_path: P) -> GenericResult<
         path = path.parent().ok_or_else(|| format!(
             "Invalid restoring file path: {:?}", file_path.as_ref()))?;
 
-        if util::is_root_path(path) {
+        if util::sys::is_root_path(path) {
             break;
         }
 

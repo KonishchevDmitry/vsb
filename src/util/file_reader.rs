@@ -3,7 +3,7 @@ use std::io::{self, Read};
 use digest::Digest as DigestTrait;
 use lazy_static::lazy_static;
 
-use crate::hash::Hash;
+use crate::util::hash::Hash;
 
 type Digest = sha2::Sha512;
 

@@ -8,7 +8,7 @@ use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::Hash;
+use crate::util::hash::Hash;
 
 pub struct MetadataItem {
     pub path: String,

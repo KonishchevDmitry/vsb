@@ -18,12 +18,11 @@ use nix::sys::stat::Mode;
 use crate::backuping::{Backuper, BackupInstance};
 use crate::config::{BackupConfig, BackupItemConfig};
 use crate::core::{GenericResult, EmptyResult};
-use crate::hash::Hash;
-use crate::metadata::{Fingerprint, MetadataItem};
-use crate::provider::ReadProvider;
-use crate::providers::filesystem::Filesystem;
+use crate::providers::{ReadProvider, filesystem::Filesystem};
 use crate::restoring::Restorer;
 use crate::storage::{Backup, Storage};
+use crate::storage::metadata::{Fingerprint, MetadataItem};
+use crate::util::hash::Hash;
 
 #[test]
 fn backup() -> EmptyResult {

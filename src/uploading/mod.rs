@@ -1,20 +1,21 @@
+mod check;
+mod metrics;
+mod sync;
+
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 
 use easy_logging::GlobalContext;
-use log::{log_enabled, debug, info, error};
+use log::{debug, error, info, log_enabled};
 use nix::errno::Errno;
 use nix::fcntl::{self, FlockArg};
 
-use crate::check;
-use crate::config::{Config, BackupConfig, ProviderConfig};
+use crate::config::{BackupConfig, Config, ProviderConfig};
 use crate::core::{EmptyResult, GenericResult};
-use crate::metrics;
 use crate::providers::dropbox::Dropbox;
 use crate::providers::filesystem::Filesystem;
 use crate::providers::google_drive::GoogleDrive;
-use crate::storage::{Storage, BackupGroup};
-use crate::sync;
+use crate::storage::{BackupGroup, Storage};
 
 pub fn upload(config: &Config) -> GenericResult<bool> {
     let mut ok = true;

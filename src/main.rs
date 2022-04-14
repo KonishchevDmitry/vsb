@@ -1,25 +1,13 @@
-// FIXME(konishchev): Refactor modules
 #[macro_use] mod core;
 mod backuping;
-mod check;
 mod cli;
 mod config;
-mod encryptor;
-mod file_reader;
-mod hash;
 mod http_client;
-mod metadata;
-mod metrics;
-mod oauth;
-mod provider;
 mod providers;
 mod restoring;
 mod storage;
-mod stream_splitter;
-mod sync;
 #[cfg(test)] mod tests;
-mod uploader;
-mod users;
+mod uploading;
 mod util;
 
 use std::io::{self, Write};
@@ -63,6 +51,6 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
     match parser.parse()? {
         Action::Backup {name} => backuping::backup(config.get_backup(&name)?),
         Action::Restore {backup_path, restore_path} => restoring::restore(&backup_path, &restore_path),
-        Action::Upload => uploader::upload(&config),
+        Action::Upload => uploading::upload(&config),
     }
 }

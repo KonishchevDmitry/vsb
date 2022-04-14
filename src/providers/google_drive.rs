@@ -9,12 +9,13 @@ use serde::de;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::hash::{Hasher, Md5};
 use crate::http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyRequest,
                          RawResponseReader, JsonErrorReader, HttpClientError, headers};
-use crate::oauth::OauthClient;
-use crate::provider::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
-use crate::stream_splitter::{ChunkStreamReceiver, ChunkStream};
+use crate::util::hash::{Hasher, Md5};
+use crate::util::stream_splitter::{ChunkStreamReceiver, ChunkStream};
+
+use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use super::oauth::OauthClient;
 
 const OAUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2";
 
