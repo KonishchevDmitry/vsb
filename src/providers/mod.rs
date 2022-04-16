@@ -13,6 +13,13 @@ use crate::util::stream_splitter::ChunkStreamReceiver;
 pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
     fn type_(&self) -> ProviderType;
+
+    fn clarification(&self) -> String {
+        match self.type_() {
+            ProviderType::Cloud => format!(" on {}", self.name()),
+            ProviderType::Local => String::new(),
+        }
+    }
 }
 
 pub trait ReadProvider: Provider {

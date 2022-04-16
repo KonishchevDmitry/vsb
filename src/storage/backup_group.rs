@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use log::error;
+use log::{error, warn};
 
 use crate::core::GenericResult;
 use crate::providers::{ReadProvider, FileType};
@@ -11,6 +11,7 @@ use super::traits::BackupTraits;
 pub struct BackupGroup {
     pub name: String,
     pub backups: Vec<Backup>,
+    pub temporary_backups: Vec<Backup>,
 }
 
 impl BackupGroup {
@@ -18,11 +19,12 @@ impl BackupGroup {
         BackupGroup {
             name: name.to_owned(),
             backups: Vec::new(),
+            temporary_backups: Vec::new(),
         }
     }
 
     pub fn list(provider: &dyn ReadProvider, path: &str) -> GenericResult<(Vec<BackupGroup>, bool)> {
-        let backup_traits = BackupTraits::get_for(provider.type_());
+        let traits = BackupTraits::get_for(provider.type_());
 
         let mut ok = true;
         let mut backup_groups = Vec::new();
@@ -33,12 +35,13 @@ impl BackupGroup {
 
         for file in files {
             if file.name.starts_with('.') {
+                // Assume OS-dependent hidden file
                 continue
             }
 
-            if file.type_ != FileType::Directory || !backup_traits.group_name_regex.is_match(&file.name) {
-                error!("{:?} backup root on {} contains an unexpected {}: {:?}.",
-                       path, provider.name(), file.type_, file.name);
+            if file.type_ != FileType::Directory || !traits.group_name_regex.is_match(&file.name) {
+                error!("{:?} backup root{} contains an unexpected {}: {:?}.",
+                       path, provider.clarification(), file.type_, file.name);
                 ok = false;
                 continue;
             }
@@ -61,36 +64,51 @@ impl BackupGroup {
         let mut first_backup = true;
 
         let mut group = BackupGroup::new(name);
-        let backup_traits = BackupTraits::get_for(provider.type_());
+        let traits = BackupTraits::get_for(provider.type_());
 
         let mut files = provider.list_directory(path)?.ok_or_else(||
             "The backup group doesn't exist".to_owned())?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
 
         for file in files {
-            if file.name.starts_with('.') {
-                continue
-            }
+            let (stripped_file_name, temporary) = match file.name.strip_prefix(traits.temporary_prefix) {
+                Some(stripped_name) => (stripped_name, true),
+                None => (file.name.as_str(), false),
+            };
 
-            let captures = backup_traits.name_regex.captures(&file.name);
-            if file.type_ != backup_traits.file_type || captures.is_none() {
-                error!("{:?} backup group on {} contains an unexpected {}: {:?}.",
-                       path, provider.name(), file.type_, file.name);
-                ok = false;
-                continue
-            }
+            let backup_name = match traits.name_regex.captures(stripped_file_name) {
+                Some(captures) if file.type_ == traits.file_type => {
+                    // captures.name("name").unwrap().as_str()
+                    captures.get(0).unwrap().as_str()
+                },
+                None if file.name.starts_with('.') => {
+                    // Assume OS-dependent hidden file
+                    continue
+                },
+                _ => {
+                    error!("{:?} backup group{} contains an unexpected {}: {:?}.",
+                        path, provider.clarification(), file.type_, file.name);
+                    ok = false;
+                    continue
+                },
+            };
 
-            let backup_name = captures.unwrap().get(1).unwrap().as_str();
             let backup_path = format!("{}/{}", path, file.name);
+            if temporary {
+                warn!("{:?} backup group{} contains a temporary {:?} backup.",
+                    path, provider.clarification(), backup_name);
+                group.temporary_backups.push(Backup::new(&backup_path, backup_name));
+                continue
+            }
 
             if first_backup {
                 first_backup = false;
 
                 if cfg!(not(test)) && backup_name.split('-').next().unwrap() != group.name {
                     error!(concat!(
-                        "Suspicious first backup {:?} in {:?} group on {}: ",
+                        "Suspicious first backup {:?} in {:?} group{}: ",
                         "possibly corrupted backup group."
-                    ), backup_name, group.name, provider.name());
+                    ), backup_name, group.name, provider.clarification());
                     ok = false;
                 }
             }
@@ -104,7 +122,7 @@ impl BackupGroup {
                     if strict {
                         return Err!("Error while reading {:?} backup: {}", backup_path, e);
                     }
-                    error!("{:?} backup on {} reading error: {}.", backup_path, provider.name(), e);
+                    error!("{:?} backup{} reading error: {}.", backup_path, provider.clarification(), e);
                     ok = false;
                     continue;
                 }
@@ -124,8 +142,8 @@ impl BackupGroup {
             match backup.inspect(provider, &mut available_hashes) {
                 Ok(recoverable) => ok &= recoverable,
                 Err(err) => {
-                    error!("{:?} backup on {} validation error: {}.",
-                           backup.path, provider.name(), err);
+                    error!("{:?} backup{} validation error: {}.",
+                           backup.path, provider.clarification(), err);
                     ok = false;
                 }
             };

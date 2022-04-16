@@ -10,6 +10,7 @@ use std::time::SystemTime;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use filetime::FileTime;
+use itertools::Itertools;
 use log::info;
 use maplit::hashset;
 use sha2::Sha512;
@@ -130,6 +131,7 @@ fn backup() -> EmptyResult {
 
         let (groups, ok) = storage.get_backup_groups(true)?;
         assert!(ok);
+        assert!(groups.iter().all(|group| group.temporary_backups.is_empty()));
         assert_eq!(groups.len(), std::cmp::min(pass / max_backups_per_group + 1, max_backup_groups));
 
         let group = groups.last().unwrap();
@@ -180,13 +182,19 @@ fn backup() -> EmptyResult {
 
     let (groups, ok) = storage.get_backup_groups(true)?;
     assert!(ok);
+    assert!(groups.iter().all(|group| group.temporary_backups.is_empty()));
 
     let mut restore_pass = max_backups_per_group; // First group will be deleted as old
     fs::remove_dir_all(skipped_path)?;
 
+    info!("Restoring the following groups:");
+    for group in &groups {
+        info!("* {}: {}", group.name, group.backups.iter().map(|backup| &backup.name).join(", "));
+    }
+
     for group in groups {
         for backup in group.backups {
-            info!("Restore #{} pass...", restore_pass);
+            info!("Restore #{} pass ({})...", restore_pass, backup.name);
             let restore_dir = temp_dir.join("restore");
 
             let restorer = Restorer::new(Path::new(&backup.path))?;

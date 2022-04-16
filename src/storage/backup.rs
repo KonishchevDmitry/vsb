@@ -134,9 +134,9 @@ impl Backup {
 
                 if file.size != 0 && !available_hashes.contains(&file.hash) {
                     error!(concat!(
-                        "{:?} backup on {} is not recoverable: ",
+                        "{:?} backup{} is not recoverable: ",
                         "unable to find extern {:?} file in the backup group."
-                    ), self.name, provider.name(), file.path);
+                    ), self.name, provider.clarification(), file.path);
                     recoverable = false;
                 }
             }
@@ -144,7 +144,7 @@ impl Backup {
 
         let has_files = stat.unique_files != 0 || stat.extern_files != 0;
         if !has_files {
-            error!("{:?} backup on {} don't have any files.", self.name, provider.name());
+            error!("{:?} backup{} don't have any files.", self.name, provider.clarification());
         }
         self.inner_stat.replace(stat);
 

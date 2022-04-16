@@ -27,6 +27,7 @@ const SECOND_PRECISION_NAME_REGEX: &str = concatcp!(DAY_PRECISION_NAME_REGEX, r"
 
 pub struct BackupTraits {
     pub file_type: FileType,
+    pub temporary_prefix: &'static str,
     pub name_format: &'static str,
     pub name_regex: Regex,
     pub extension: &'static str,
@@ -39,8 +40,9 @@ impl BackupTraits {
     fn new(file_type: FileType, extension: &'static str) -> BackupTraits {
         BackupTraits {
             file_type,
+            temporary_prefix: ".",
             name_format: BACKUP_NAME_FORMAT,
-            name_regex: Regex::new(&format!("^({}){}$", BACKUP_NAME_REGEX, regex::escape(extension))).unwrap(),
+            name_regex: Regex::new(&format!("^(?P<name>{}){}$", BACKUP_NAME_REGEX, regex::escape(extension))).unwrap(),
             extension: extension,
 
             group_name_format: GROUP_NAME_FORMAT,

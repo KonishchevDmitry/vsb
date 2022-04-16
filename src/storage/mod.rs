@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::SystemTime;
 
 use chrono::{self, offset::Local, TimeZone};
-use log::info;
+use log::{info, warn, error};
 use rayon::prelude::*;
 
 use crate::core::{EmptyResult, GenericResult};
@@ -60,17 +60,12 @@ impl Storage {
         BackupTraits::get_for(self.provider.read().type_())
     }
 
-    // FIXME(konishchev): Rewrite
-    fn clarification(&self) -> String {
-        format!(" on {}", self.name())
-    }
-
     pub fn get_backup_groups(&self, verify: bool) -> GenericResult<(Vec<BackupGroup>, bool)> {
         let provider = self.provider.read();
         let (mut groups, mut ok) = BackupGroup::list(provider, &self.path)?;
 
         if verify && !groups.is_empty() {
-            info!("Verifying backups on {}...", self.name());
+            info!("Verifying backups{}...", provider.clarification());
             ok &= groups.par_iter_mut().map(|group: &mut BackupGroup| {
                 group.inspect(provider)
             }).all(|result| result);
@@ -80,9 +75,13 @@ impl Storage {
     }
 
     pub fn create_backup_group(&self, name: &str) -> GenericResult<BackupGroup> {
-        info!("Creating {:?} backup group{}...", name, self.clarification());
+        let provider = self.provider.write()?;
+
+        info!("Creating {:?} backup group{}...", name, provider.clarification());
         let path = self.get_backup_group_path(name);
-        self.provider.write()?.create_directory(&path)?;
+        provider.create_directory(&path).map_err(|e| format!(
+            "Failed to create {:?} backup group{}: {}", path, provider.clarification(), e))?;
+
         Ok(BackupGroup::new(name))
     }
 
@@ -107,8 +106,15 @@ impl Storage {
 
         let group = match groups.last() {
             Some(group) if group.backups.len() < max_backups => {
-                // FIXME(konishchev): Cleanup group from temporary files?
-                info!("Using {:?} backup group{}.", group.name, self.clarification());
+                info!("Using {:?} backup group.", group.name);
+
+                for backup in &group.temporary_backups {
+                    warn!("Deleting abandoned temporary {:?} backup...", backup.path);
+                    if let Err(err) = provider.delete(&backup.path) {
+                        error!("Failed to delete a temporary {:?} backup: {}.", backup.path, err);
+                    }
+                }
+
                 groups.pop().unwrap()
             },
             _ => {
@@ -120,15 +126,14 @@ impl Storage {
             },
         };
 
-        // FIXME(konishchev): Check existence?
         let backup_name = now.format(backup_traits.name_format).to_string();
         let backup_path = self.get_backup_path(&group.name, &backup_name, true);
         let backup = Backup::new(&backup_path, &backup_name);
 
-        info!("Creating {:?} backup{}...", backup.name, self.clarification());
-        provider.create_directory(&backup.path)?;
+        info!("Creating {:?} backup{}...", backup.name, provider.clarification());
+        provider.create_directory(&backup.path).map_err(|e| format!(
+            "Failed to create {:?} backup: {}", backup.path, e))?;
 
-        // FIXME(konishchev): Add to group?
         Ok((group, backup))
     }
 
@@ -188,15 +193,12 @@ impl Storage {
     }
 
     fn get_backup_file_name(&self, backup_name: &str, temporary: bool) -> String {
-        let extension = BackupTraits::get_for(self.provider.read().type_()).extension;
-
-        let prefix = if temporary {
-            "."
+        let traits = self.backup_traits();
+        format!("{prefix}{name}{extension}", prefix = if temporary {
+            traits.temporary_prefix
         } else {
             ""
-        }.to_owned();
-
-        prefix + backup_name + extension
+        }, name = backup_name, extension = traits.extension)
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
