@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, ErrorKind};
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::util::hash::Hasher;
@@ -31,7 +31,7 @@ impl ReadProvider for Filesystem {
         let entries = fs::read_dir(path);
 
         if let Err(ref err) = entries {
-            if err.kind() == io::ErrorKind::NotFound {
+            if err.kind() == ErrorKind::NotFound {
                 return Ok(None);
             }
         }
@@ -94,7 +94,12 @@ impl WriteProvider for Filesystem {
     }
 
     // FIXME(konishchev): Implement
-    fn delete(&self, _path: &str) -> EmptyResult {
-        unreachable!()
+    fn delete(&self, path: &str) -> EmptyResult {
+        if fs::symlink_metadata(path)?.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+        Ok(())
     }
 }

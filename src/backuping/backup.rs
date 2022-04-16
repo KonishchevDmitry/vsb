@@ -11,7 +11,7 @@ use tar::Header;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
-use crate::storage::{Storage, StorageRc, BackupGroup, Backup};
+use crate::storage::{Storage, BackupGroup, Backup};
 use crate::storage::metadata::{MetadataItem, Fingerprint, MetadataWriter};
 use crate::util::{self, hash::Hash};
 use crate::util::file_reader::{FileReader, EMPTY_FILE_HASH};
@@ -30,7 +30,7 @@ pub struct BackupInstance {
 }
 
 impl BackupInstance {
-    pub fn create(config: &BackupConfig, storage: StorageRc) -> GenericResult<(BackupInstance, bool)> {
+    pub fn create(config: &BackupConfig, storage: &Storage) -> GenericResult<(BackupInstance, bool)> {
         let (group, backup) = storage.create_backup(config.max_backups)?;
         let mut instance = BackupInstance {
             path: storage.get_backup_path(&group.name, &backup.name, false).into(),
@@ -60,7 +60,7 @@ impl BackupInstance {
             )
         )));
 
-        let (extern_hashes, last_state, ok) = load_backups_metadata(&storage, &group);
+        let (extern_hashes, last_state, ok) = load_backups_metadata(storage, &group);
         instance.extern_hashes = extern_hashes;
         instance.last_state = last_state;
 

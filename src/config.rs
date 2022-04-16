@@ -26,6 +26,7 @@ pub struct Config {
     pub prometheus_metrics: Option<String>,
 }
 
+// FIXME(konishchev): Rewrite
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
@@ -36,13 +37,16 @@ pub struct BackupConfig {
     pub items: Option<Vec<BackupItemConfig>>,
 
     #[validate(range(min = 1))]
+    pub max_backup_groups: usize,
+
+    #[validate(range(min = 1))]
     pub max_backups: usize,
 
-    // FIXME(konishchev): Rewrite
     #[validate]
     pub upload: Option<UploadConfig>,
 }
 
+// FIXME(konishchev): Rewrite
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct UploadConfig {

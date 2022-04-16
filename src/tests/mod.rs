@@ -15,7 +15,7 @@ use maplit::hashset;
 use sha2::Sha512;
 use nix::sys::stat::Mode;
 
-use crate::backuping::{Backuper, BackupInstance};
+use crate::backuping;
 use crate::config::{BackupConfig, BackupItemConfig};
 use crate::core::{GenericResult, EmptyResult};
 use crate::providers::{ReadProvider, filesystem::Filesystem};
@@ -45,13 +45,16 @@ fn backup() -> EmptyResult {
     let other_user_path = home_path.join("other-user");
     let skipped_path = sources_path.join(skipped_dir_name);
 
-    let total_backups = 9;
-    let backups_per_group = 5;
+    let max_backup_groups = 2;
+    let max_backups_per_group = 5;
+    let total_backups = (max_backup_groups + 1) * max_backups_per_group - 1;
 
-    let backup_config = BackupConfig {
-        name: s!("test"),
+    let config = BackupConfig {
+        name: "test".to_owned(),
         path: backup_root_path.to_str().unwrap().to_owned(),
-        max_backups: backups_per_group,
+
+        max_backup_groups,
+        max_backups: max_backups_per_group,
 
         items: Some(vec![BackupItemConfig {
             path: user_path.to_str().unwrap().to_owned(),
@@ -109,20 +112,17 @@ fn backup() -> EmptyResult {
             FileState::new(&same_mutable_orig_file_path, format!("same-pass-{}", pass))?,
             FileState::new(&same_mutable_extern_file_path, format!("same-pass-{}", pass))?,
             FileState::new(&periodically_mutable_file_path, format!("periodically-{}", pass / 2 * 2))?,
+            // FIXME(konishchev): Periodically existing file
         ]);
 
-        let (backup, ok) = BackupInstance::create(&backup_config, storage.clone())?;
-        assert!(ok);
-
-        let backuper = Backuper::new(&backup_config, backup)?;
-        assert!(backuper.run()?);
+        assert!(backuping::backup(&config)?);
 
         let (groups, ok) = storage.get_backup_groups(true)?;
         assert!(ok);
-        assert_eq!(groups.len(), pass / backups_per_group + 1);
+        assert_eq!(groups.len(), std::cmp::min(pass / max_backups_per_group + 1, max_backup_groups));
 
         let group = groups.last().unwrap();
-        assert_eq!(group.backups.len(), pass % backups_per_group + 1);
+        assert_eq!(group.backups.len(), pass % max_backups_per_group + 1);
 
         let backup = group.backups.last().unwrap();
         let files = read_metadata(storage.provider.read(), backup)?;
@@ -154,7 +154,7 @@ fn backup() -> EmptyResult {
             assert_eq!(file.fingerprint, Fingerprint::new(&metadata));
 
             let expected_unique =
-                pass % backups_per_group == 0 && !always_extern.contains(&path) ||
+                pass % max_backups_per_group == 0 && !always_extern.contains(&path) ||
                 path == periodically_mutable_file_path && pass % 2 == 0 ||
                 always_unique.contains(&path);
             assert_eq!(file.unique, expected_unique, "{}: unique={}", path.display(), file.unique);
@@ -168,7 +168,7 @@ fn backup() -> EmptyResult {
     let (groups, ok) = storage.get_backup_groups(true)?;
     assert!(ok);
 
-    let mut restore_pass = 0;
+    let mut restore_pass = max_backups_per_group; // First group will be deleted as old
     fs::remove_dir_all(skipped_path)?;
 
     for group in groups {
