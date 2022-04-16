@@ -24,13 +24,15 @@ pub trait ReadProvider: Provider {
 }
 
 pub trait WriteProvider: Provider {
+    fn create_directory(&self, path: &str) -> EmptyResult;
+    fn delete(&self, path: &str) -> EmptyResult;
+}
+
+pub trait UploadProvider: Provider {
     fn hasher(&self) -> Box<dyn Hasher>;
     fn max_request_size(&self) -> Option<u64>;
-
-    fn create_directory(&self, path: &str) -> EmptyResult;
     fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
                    chunk_streams: ChunkStreamReceiver) -> EmptyResult;
-    fn delete(&self, path: &str) -> EmptyResult;
 }
 
 pub enum ProviderType {

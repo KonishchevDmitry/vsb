@@ -102,7 +102,7 @@ fn backup() -> EmptyResult {
         }
     }
 
-    let storage = Storage::new(Filesystem::new(), backup_root_path.to_str().unwrap());
+    let storage = Storage::new_read_only(Filesystem::new(), backup_root_path.to_str().unwrap());
 
     for pass in 0..total_backups {
         info!("Backup #{} pass...", pass);

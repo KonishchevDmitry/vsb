@@ -14,7 +14,7 @@ use crate::http_client::{
 use crate::util::hash::{Hasher, ChunkedSha256};
 use crate::util::stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use super::{Provider, ProviderType, ReadProvider, WriteProvider, UploadProvider, File, FileType};
 use super::oauth::OauthClient;
 
 const OAUTH_ENDPOINT: &str = "https://www.dropbox.com/oauth2";
@@ -174,14 +174,6 @@ impl ReadProvider for Dropbox {
 }
 
 impl WriteProvider for Dropbox {
-    fn hasher(&self) -> Box<dyn Hasher> {
-        Box::new(ChunkedSha256::new(4 * 1024 * 1024))
-    }
-
-    fn max_request_size(&self) -> Option<u64> {
-        Some(150 * 1024 * 1024)
-    }
-
     fn create_directory(&self, path: &str) -> EmptyResult {
         #[derive(Serialize)]
         struct Request<'a> {
@@ -193,6 +185,29 @@ impl WriteProvider for Dropbox {
         })?;
 
         Ok(())
+    }
+
+    fn delete(&self, path: &str) -> EmptyResult {
+        #[derive(Serialize)]
+        struct Request<'a> {
+            path: &'a str,
+        }
+
+        let _: EmptyResponse = self.api_request("/files/delete_v2", &Request {
+            path: path
+        })?;
+
+        Ok(())
+    }
+}
+
+impl UploadProvider for Dropbox {
+    fn hasher(&self) -> Box<dyn Hasher> {
+        Box::new(ChunkedSha256::new(4 * 1024 * 1024))
+    }
+
+    fn max_request_size(&self) -> Option<u64> {
+        Some(150 * 1024 * 1024)
     }
 
     fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
@@ -279,19 +294,6 @@ impl WriteProvider for Dropbox {
         }
 
         Err!("Chunk stream sender has been closed without a termination message")
-    }
-
-    fn delete(&self, path: &str) -> EmptyResult {
-        #[derive(Serialize)]
-        struct Request<'a> {
-            path: &'a str,
-        }
-
-        let _: EmptyResponse = self.api_request("/files/delete_v2", &Request {
-            path: path
-        })?;
-
-        Ok(())
     }
 }
 

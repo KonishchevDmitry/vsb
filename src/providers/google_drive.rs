@@ -14,7 +14,7 @@ use crate::http_client::{HttpClient, Method, HttpRequest, HttpResponse, EmptyReq
 use crate::util::hash::{Hasher, Md5};
 use crate::util::stream_splitter::{ChunkStreamReceiver, ChunkStream};
 
-use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
+use super::{Provider, ProviderType, ReadProvider, WriteProvider, UploadProvider, File, FileType};
 use super::oauth::OauthClient;
 
 const OAUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2";
@@ -306,14 +306,6 @@ impl ReadProvider for GoogleDrive {
 }
 
 impl WriteProvider for GoogleDrive {
-    fn hasher(&self) -> Box<dyn Hasher> {
-        Box::new(Md5::new())
-    }
-
-    fn max_request_size(&self) -> Option<u64> {
-        None
-    }
-
     fn create_directory(&self, path: &str) -> EmptyResult {
         let content_type = DIRECTORY_MIME_TYPE;
         let upload_url = self.start_file_upload(path, content_type, false)?;
@@ -321,6 +313,20 @@ impl WriteProvider for GoogleDrive {
             .with_text_body(content_type, "")?;
         self.client.send(request)?;
         Ok(())
+    }
+
+    fn delete(&self, path: &str) -> EmptyResult {
+        self.delete_file(path, false)
+    }
+}
+
+impl UploadProvider for GoogleDrive {
+    fn hasher(&self) -> Box<dyn Hasher> {
+        Box::new(Md5::new())
+    }
+
+    fn max_request_size(&self) -> Option<u64> {
+        None
     }
 
     fn upload_file(&self, directory_path: &str, temp_name: &str, name: &str,
@@ -391,10 +397,6 @@ impl WriteProvider for GoogleDrive {
         }
 
         Err!("Chunk stream sender has been closed without a termination message")
-    }
-
-    fn delete(&self, path: &str) -> EmptyResult {
-        self.delete_file(path, false)
     }
 }
 

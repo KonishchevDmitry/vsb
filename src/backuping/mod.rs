@@ -15,7 +15,7 @@ use self::backuper::Backuper;
 pub use self::config::BackupItemConfig;
 
 pub fn backup(config: &BackupConfig) -> GenericResult<bool> {
-    let storage = Storage::new(Filesystem::new(), &config.path);
+    let storage = Storage::new_read_write(Filesystem::new(), &config.path);
 
     let (backup, mut ok) = BackupInstance::create(config, &storage)?;
     ok &= Backuper::new(config, backup)?.run()?;

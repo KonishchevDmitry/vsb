@@ -13,10 +13,10 @@ use log::info;
 use rayon::prelude::*;
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::providers::{FileType, ReadProvider, WriteProvider};
+use crate::providers::{FileType, ReadProvider, WriteProvider, UploadProvider};
 use crate::util::{self, stream_splitter};
 
-use self::adapters::{AbstractProvider, ReadOnlyProviderAdapter, ReadWriteProviderAdapter};
+use self::adapters::{AbstractProvider, ReadOnlyProviderAdapter, ReadWriteProviderAdapter, UploadProviderAdapter};
 use self::encryptor::Encryptor;
 
 pub use self::backup::Backup;
@@ -31,16 +31,23 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> StorageRc {
+    pub fn new_read_only<T: ReadProvider + 'static>(provider: T, path: &str) -> StorageRc {
+        Rc::new(Storage {
+            provider: ReadOnlyProviderAdapter::new(provider),
+            path: path.to_owned(),
+        })
+    }
+
+    pub fn new_read_write<T: ReadProvider + WriteProvider + 'static>(provider: T, path: &str) -> StorageRc {
         Rc::new(Storage {
             provider: ReadWriteProviderAdapter::new(provider),
             path: path.to_owned(),
         })
     }
 
-    pub fn new_read_only<T: ReadProvider + 'static>(provider: T, path: &str) -> StorageRc {
+    pub fn new_upload<T: ReadProvider + WriteProvider + UploadProvider + 'static>(provider: T, path: &str) -> StorageRc {
         Rc::new(Storage {
-            provider: ReadOnlyProviderAdapter::new(provider),
+            provider: UploadProviderAdapter::new(provider),
             path: path.to_owned(),
         })
     }
@@ -127,7 +134,7 @@ impl Storage {
 
     pub fn upload_backup(&self, local_backup_path: &str, group_name: &str, backup_name: &str,
                          encryption_passphrase: &str) -> EmptyResult {
-        let provider = self.provider.write()?;
+        let provider = self.provider.upload()?;
         let (encryptor, data_stream) = Encryptor::new(encryption_passphrase, provider.hasher())?;
 
         let backup_name = backup_name.to_owned();

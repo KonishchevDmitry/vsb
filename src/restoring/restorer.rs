@@ -51,7 +51,7 @@ impl Restorer {
             }
         };
 
-        let storage = Storage::new(Filesystem::new(), backup_root);
+        let storage = Storage::new_read_only(Filesystem::new(), backup_root);
         let backup_traits = storage.backup_traits();
 
         if

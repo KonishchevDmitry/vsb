@@ -2,8 +2,6 @@ use std::fs;
 use std::io::{self, ErrorKind};
 
 use crate::core::{EmptyResult, GenericResult};
-use crate::util::hash::Hasher;
-use crate::util::stream_splitter::ChunkStreamReceiver;
 
 use super::{Provider, ProviderType, ReadProvider, WriteProvider, File, FileType};
 
@@ -72,28 +70,10 @@ impl ReadProvider for Filesystem {
 }
 
 impl WriteProvider for Filesystem {
-    // FIXME(konishchev): Implement
-    fn hasher(&self) -> Box<dyn Hasher> {
-        unreachable!()
-    }
-
-    // FIXME(konishchev): Implement
-    fn max_request_size(&self) -> Option<u64> {
-        unreachable!()
-    }
-
-    // FIXME(konishchev): Implement
     fn create_directory(&self, path: &str) -> EmptyResult {
         Ok(fs::create_dir(path)?)
     }
 
-    // FIXME(konishchev): Implement
-    fn upload_file(&self, _directory_path: &str, _temp_name: &str, _name: &str,
-                   _chunk_streams: ChunkStreamReceiver) -> EmptyResult {
-        unreachable!()
-    }
-
-    // FIXME(konishchev): Implement
     fn delete(&self, path: &str) -> EmptyResult {
         if fs::symlink_metadata(path)?.is_dir() {
             fs::remove_dir_all(path)?;
