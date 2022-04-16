@@ -86,6 +86,8 @@ fn backup() -> EmptyResult {
     let same_mutable_orig_file_path = user_path.join("same-mutable-1/nested/same-mutable");
     let same_mutable_extern_file_path = user_path.join("same-mutable-2/nested/same-mutable");
     let periodically_mutable_file_path = user_path.join("periodically-mutable");
+    let periodically_existing_file_path = user_path.join("periodically-existing");
+    let periodically_same_existing_file_path = user_path.join("periodically-same-existing");
 
     // Restoring logic will have to create extern file's directories before it'll see them in the
     // archive.
@@ -108,11 +110,20 @@ fn backup() -> EmptyResult {
         info!("Backup #{} pass...", pass);
 
         mutable_files_states.push(vec![
-            FileState::new(&mutable_file_path, format!("pass-{}", pass))?,
-            FileState::new(&same_mutable_orig_file_path, format!("same-pass-{}", pass))?,
-            FileState::new(&same_mutable_extern_file_path, format!("same-pass-{}", pass))?,
-            FileState::new(&periodically_mutable_file_path, format!("periodically-{}", pass / 2 * 2))?,
-            // FIXME(konishchev): Periodically existing file
+            FileState::new(&mutable_file_path, Some(format!("pass-{}", pass)))?,
+            FileState::new(&same_mutable_orig_file_path, Some(format!("same-pass-{}", pass)))?,
+            FileState::new(&same_mutable_extern_file_path, Some(format!("same-pass-{}", pass)))?,
+            FileState::new(&periodically_mutable_file_path, Some(format!("periodically-{}", pass / 2 * 2)))?,
+            FileState::new(&periodically_existing_file_path, if pass % 2 == 0 {
+                Some(format!("periodically-existing-{}", pass))
+            } else {
+                None
+            })?,
+            FileState::new(&periodically_same_existing_file_path, if pass % 2 != 0 {
+                Some("Periodically same existing file".to_owned())
+            } else {
+                None
+            })?,
         ]);
 
         assert!(backuping::backup(&config)?);
@@ -138,6 +149,7 @@ fn backup() -> EmptyResult {
         let always_unique = hashset! {
             &mutable_file_path,
             &same_mutable_orig_file_path,
+            &periodically_existing_file_path,
         };
 
         let always_extern = hashset! {
@@ -156,6 +168,7 @@ fn backup() -> EmptyResult {
             let expected_unique =
                 pass % max_backups_per_group == 0 && !always_extern.contains(&path) ||
                 path == periodically_mutable_file_path && pass % 2 == 0 ||
+                path == periodically_same_existing_file_path && [1, 5, 11].contains(&pass) ||
                 always_unique.contains(&path);
             assert_eq!(file.unique, expected_unique, "{}: unique={}", path.display(), file.unique);
 
@@ -227,24 +240,48 @@ impl Drop for RestoreGitFiles {
 
 struct FileState {
     path: PathBuf,
-    contents: String,
-    modify_time: SystemTime,
+    contents: Option<(String, SystemTime)>,
+
+    parent_path: PathBuf,
+    parent_modify_time: SystemTime,
 }
 
 impl FileState {
-    fn new(path: &Path, contents: String) -> GenericResult<FileState> {
-        fs::write(&path, &contents)?;
+    fn new(path: &Path, contents: Option<String>) -> GenericResult<FileState> {
+        let parent_path = path.parent().ok_or_else(|| format!("Invalid file path: {:?}", path))?;
+
+        let contents = if let Some(contents) = contents {
+            fs::write(&path, &contents)?;
+            Some((contents, fs::metadata(path)?.modified()?))
+        } else {
+            if let Err(err) = fs::remove_file(path) {
+                if err.kind() != ErrorKind::NotFound {
+                    return Err(err.into());
+                }
+            }
+            None
+        };
 
         Ok(FileState {
-            path: path.to_owned(),
-            contents,
-            modify_time: fs::metadata(path)?.modified()?,
+            path: path.to_owned(), contents,
+            parent_path: parent_path.to_owned(),
+            parent_modify_time: fs::metadata(parent_path)?.modified()?,
         })
     }
 
     fn restore(&self) -> EmptyResult {
-        fs::write(&self.path, &self.contents)?;
-        filetime::set_file_mtime(&self.path, FileTime::from_system_time(self.modify_time))?;
+        if let Some((ref contents, modify_time)) = self.contents {
+            fs::write(&self.path, contents)?;
+            filetime::set_file_mtime(&self.path, FileTime::from_system_time(modify_time))?;
+        } else {
+            if let Err(err) = fs::remove_file(&self.path) {
+                if err.kind() != ErrorKind::NotFound {
+                    return Err(err.into());
+                }
+            }
+        };
+
+        filetime::set_file_mtime(&self.parent_path, FileTime::from_system_time(self.parent_modify_time))?;
         Ok(())
     }
 }

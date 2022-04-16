@@ -1,4 +1,6 @@
 /mutable
 /periodically-mutable
+/periodically-existing
+/periodically-same-existing
 /same-mutable-1/nested/same-mutable
 /same-mutable-2/nested/same-mutable

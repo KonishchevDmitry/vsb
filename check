@@ -29,6 +29,7 @@ main() {
     touch src/main.rs
 
     blacklist='
+        collapsible_else_if
         redundant_field_names
         new-ret-no-self
     '
