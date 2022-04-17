@@ -1,6 +1,7 @@
 mod backup;
 mod backuper;
 mod config;
+#[cfg(test)] mod filter;
 
 use log::{info, error};
 
