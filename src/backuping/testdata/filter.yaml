@@ -1,1 +1,19 @@
-/Users/konishchev/.vsb.yaml
+filter: |
+  # MacOS hidden files
+  - **/Icon\r
+  - **/.DS_Store
+  
+  - Downloads
+  
+  - .investments/db.sqlite
+  - .ssh/*.socket
+  - .vim/{bundle,view}
+  
+  + .vscode/ssh
+  - .vscode/*
+  
+  - src/project/**/buildtools/{darwin,linux}-bin
+  - src/**/.vagrant/machines/default/virtualbox/*.vdi
+
+  # Object files
+  - src/**/*.{o,so}

@@ -127,17 +127,25 @@ fn parse_rule(rule: &str) -> Option<(Matcher, bool)> {
         _ => return None,
     };
 
-    let matcher = chars.next()?;
-    let space = chars.next()?;
-    let text = chars.as_str();
+    Some((match chars.next()? {
+        ' ' => {
+            let text = chars.as_str();
+            if text.is_empty() {
+                return None;
+            }
 
-    if space != ' ' || text.is_empty() {
-        return None;
-    }
+            Matcher::Glob(text)
+        },
+        '~' => {
+            let space = chars.next()?;
+            let text = chars.as_str();
 
-    Some((match matcher {
-        '*' => Matcher::Glob(text),
-        '~' => Matcher::Regex(text),
+            if space != ' ' || text.is_empty() {
+                return None;
+            }
+
+            Matcher::Regex(text)
+        },
         _ => return None,
     }, allow))
 }
@@ -166,13 +174,59 @@ mod tests {
     #[rstest(path, expected,
         case("some-file", true),
         case("some-dir/some-file", true),
-        case("some/excluded/file", false),
 
         case("Icon\r", false),
         case("dir/Icon\r", false),
 
         case(".DS_Store", false),
         case("dir/.DS_Store", false),
+
+        case("Downloads", false),
+        case("Downloads/some-file", true), // But we won't get there because of blacklisted parent directory
+        case("Other/Downloads", true),
+
+        case(".investments", true),
+        case(".investments/db.sqlite", false),
+        case(".investments/config.yaml", true),
+
+        case(".ssh", true),
+        case(".ssh/config", true),
+        case(".ssh/agent.socket", false),
+
+        case(".vim", true),
+        case(".vim/bundle", false),
+        case(".vim/ftplugin", true),
+        case(".vim/view", false),
+
+        case(".vscode", true),
+        case(".vscode/ssh", true),
+        case(".vscode/ssh/config", true),
+        case(".vscode/extensions", false),
+
+        case("src/project", true),
+
+        case("src/project/dir", true),
+        case("src/project/dir/sub-project", true),
+        case("src/project/dir/sub-project/buildtools", true),
+        case("src/project/dir/sub-project/buildtools/bin", true),
+        case("src/project/dir/sub-project/buildtools/darwin-bin", false),
+        case("src/project/dir/sub-project/buildtools/linux-bin", false),
+
+        case("src/project/.vagrant", true),
+        case("src/project/.vagrant/machines", true),
+        case("src/project/.vagrant/machines/default", true),
+        case("src/project/.vagrant/machines/default/virtualbox", true),
+        case("src/project/.vagrant/machines/default/virtualbox/id", true),
+        case("src/project/.vagrant/machines/default/virtualbox/disk-1.vdi", false),
+
+        case("src/obj.o", false),
+        case("src/lib.so", false),
+        case("src/project/obj.o", false),
+        case("src/project/lib.so", false),
+        case("src/project/inner/obj.o", false),
+        case("src/project/inner/lib.so", false),
+        case("src/project/obj.obj", true),
+        case("src/project/lib.soc", true),
     )]
     fn filtering(filter: &PathFilter, path: &str, expected: bool) {
         let path = Path::new(path);
@@ -185,11 +239,11 @@ mod tests {
         case(" ", None),
         case(" # Some comment ", None),
 
-        case("+* glob", Some((Matcher::Glob("glob"), true))),
-        case("-* glob", Some((Matcher::Glob("glob"), false))),
+        case("+ glob", Some((Matcher::Glob("glob"), true))),
+        case("- glob", Some((Matcher::Glob("glob"), false))),
 
-        case("+*  with spaces ", Some((Matcher::Glob(" with spaces"), true))),
-        case("+* non-comment # rule ", Some((Matcher::Glob("non-comment # rule"), true))),
+        case("+  with spaces ", Some((Matcher::Glob(" with spaces"), true))),
+        case("+ non-comment # rule ", Some((Matcher::Glob("non-comment # rule"), true))),
         case(r"+~ space at the end \  ", Some((Matcher::Regex(r"space at the end \ "), true))),
     )]
     fn parsing(line: &str, result: Option<(Matcher, bool)>) {
