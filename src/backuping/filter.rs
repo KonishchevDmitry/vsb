@@ -18,26 +18,20 @@ impl PathFilter {
         let mut rules = Vec::new();
 
         for line in spec.lines() {
-            if let Some((matcher, allow)) = parse_rule_line(line)? {
-                rules.push(Rule {
-                    matcher: matcher.compile()?,
-                    allow,
-                })
+            if let Some((glob, allow)) = parse_rule_line(line)? {
+                rules.push(Rule::new(glob, allow)?);
             }
         }
 
         Ok(PathFilter {rules})
     }
 
-    // FIXME(konishchev): Implement
     pub fn check(&self, path: &Path) -> GenericResult<bool> {
+        let path = path.to_str().ok_or("Invalid path")?;
+
         for rule in &self.rules {
-            match rule.matcher {
-                CompiledMatcher::Glob(ref glob) => {
-                    if glob.is_match(path) {
-                        return Ok(rule.allow);
-                    }
-                },
+            if rule.matcher.is_match(path) {
+                return Ok(rule.allow);
             }
         }
 
@@ -53,44 +47,29 @@ impl<'de> Deserialize<'de> for PathFilter {
 }
 
 struct Rule {
-    matcher: CompiledMatcher,
+    matcher: GlobMatcher,
     allow: bool,
 }
 
-enum CompiledMatcher {
-    Glob(GlobMatcher)
-}
+impl Rule {
+    fn new(glob: &str, allow: bool) -> GenericResult<Rule> {
+        // The glob library supports escaping only of glob control characters, so unescape other
+        // common sequences manually.
+        let unescaped =      glob.cow_replace(r"\t", "\t");
+        let unescaped = unescaped.cow_replace(r"\n", "\n");
+        let unescaped = unescaped.cow_replace(r"\r", "\r");
+        let unescaped = unescaped.cow_replace(r"\ ", " ");
 
-#[derive(Debug, PartialEq)]
-enum Matcher<'a> {
-    Glob(&'a str),
-    Regex(&'a str),
-}
+        let matcher = GlobBuilder::new(&unescaped)
+            .literal_separator(true).backslash_escape(true)
+            .build().map_err(|e| format!("Invalid glob ({:?}): {}", glob, e))?
+            .compile_matcher();
 
-impl<'a> Matcher<'a> {
-    // FIXME(konishchev): Implement
-    fn compile(self) -> GenericResult<CompiledMatcher> {
-        Ok(match self {
-            Matcher::Glob(text) => {
-                // The glob library supports escaping only of glob control characters, so unescape
-                // other common sequences manually.
-                let unescaped =      text.cow_replace(r"\t", "\t");
-                let unescaped = unescaped.cow_replace(r"\n", "\n");
-                let unescaped = unescaped.cow_replace(r"\r", "\r");
-                let unescaped = unescaped.cow_replace(r"\ ", " ");
-
-                CompiledMatcher::Glob(GlobBuilder::new(&unescaped)
-                    .literal_separator(true).backslash_escape(true)
-                    .build().map_err(|e| format!("Invalid glob ({:?}): {}", text, e))?
-                    .compile_matcher())
-            },
-
-            Matcher::Regex(_) => unimplemented!(),
-        })
+        Ok(Rule {matcher, allow})
     }
 }
 
-fn parse_rule_line(mut line: &str) -> GenericResult<Option<(Matcher, bool)>> {
+fn parse_rule_line(mut line: &str) -> GenericResult<Option<(&str, bool)>> {
     let is_whitespace = |c| matches!(c, ' ' | '\t');
 
     line = line.trim_start_matches(is_whitespace);
@@ -118,7 +97,7 @@ fn parse_rule_line(mut line: &str) -> GenericResult<Option<(Matcher, bool)>> {
     Ok(Some(parse_rule(rule).ok_or_else(|| format!("Invalid filter rule: {:?}", rule))?))
 }
 
-fn parse_rule(rule: &str) -> Option<(Matcher, bool)> {
+fn parse_rule(rule: &str) -> Option<(&str, bool)> {
     let mut chars = rule.chars();
 
     let allow = match chars.next()? {
@@ -127,27 +106,16 @@ fn parse_rule(rule: &str) -> Option<(Matcher, bool)> {
         _ => return None,
     };
 
-    Some((match chars.next()? {
-        ' ' => {
-            let text = chars.as_str();
-            if text.is_empty() {
-                return None;
-            }
+    if chars.next()? != ' ' {
+        return None;
+    }
 
-            Matcher::Glob(text)
-        },
-        '~' => {
-            let space = chars.next()?;
-            let text = chars.as_str();
+    let glob = chars.as_str();
+    if glob.is_empty() {
+        return None;
+    }
 
-            if space != ' ' || text.is_empty() {
-                return None;
-            }
-
-            Matcher::Regex(text)
-        },
-        _ => return None,
-    }, allow))
+    Some((glob, allow))
 }
 
 #[cfg(test)]
@@ -239,14 +207,17 @@ mod tests {
         case(" ", None),
         case(" # Some comment ", None),
 
-        case("+ glob", Some((Matcher::Glob("glob"), true))),
-        case("- glob", Some((Matcher::Glob("glob"), false))),
+        case("+ ab/*/cd", Some(("ab/*/cd", true))),
+        case("- ab/*/cd", Some(("ab/*/cd", false))),
 
-        case("+  with spaces ", Some((Matcher::Glob(" with spaces"), true))),
-        case("+ non-comment # rule ", Some((Matcher::Glob("non-comment # rule"), true))),
-        case(r"+~ space at the end \  ", Some((Matcher::Regex(r"space at the end \ "), true))),
+        case("+  with spaces ", Some((" with spaces", true))),
+        case("+ non-comment # rule ", Some(("non-comment # rule", true))),
+
+        case(r"+ space at the end\ ", Some((r"space at the end\ ", true))),
+        case(r"+ space at the end \ ", Some((r"space at the end \ ", true))),
+        case(r"+ space at the end \  ", Some((r"space at the end \ ", true))),
     )]
-    fn parsing(line: &str, result: Option<(Matcher, bool)>) {
+    fn parsing(line: &str, result: Option<(&str, bool)>) {
         assert_eq!(parse_rule_line(line).unwrap(), result);
     }
 }
