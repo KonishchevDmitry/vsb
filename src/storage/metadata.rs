@@ -3,9 +3,7 @@ use std::io::{self, Read, BufRead, BufReader, Lines, Write, BufWriter};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-use bzip2::Compression;
-use bzip2::read::BzDecoder;
-use bzip2::write::BzEncoder;
+use zstd::stream::{read::Decoder, write::Encoder};
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::util::hash::Hash;
@@ -113,7 +111,10 @@ pub struct MetadataReader {
 
 impl MetadataReader {
     pub fn new<R: Read + 'static>(reader: R) -> MetadataReader {
-        let reader: Box<dyn BufRead> = Box::new(BufReader::new(BzDecoder::new(reader)));
+        let reader: Box<dyn BufRead> = Box::new(BufReader::with_capacity(
+            Decoder::<Box<dyn BufRead>>::recommended_output_size(),
+            Decoder::new(reader).unwrap(),
+        ));
         MetadataReader {lines: reader.lines()}
     }
 }
@@ -127,13 +128,16 @@ impl Iterator for MetadataReader {
 }
 
 pub struct MetadataWriter<W: Write> {
-    writer: BufWriter<BzEncoder<W>>,
+    writer: BufWriter<Encoder<'static, W>>,
 }
 
 impl<W: Write> MetadataWriter<W> {
     pub fn new(writer: W) -> MetadataWriter<W> {
         MetadataWriter {
-            writer: BufWriter::new(BzEncoder::new(writer, Compression::best()))
+            writer: BufWriter::with_capacity(
+                Encoder::<W>::recommended_input_size(),
+                Encoder::new(writer, 2).unwrap(),
+            )
         }
     }
 

@@ -3,11 +3,10 @@ use std::fs::{self, File};
 use std::io::{self, SeekFrom, BufWriter, Seek};
 use std::path::{Path, PathBuf, Component};
 
-use bzip2::Compression;
-use bzip2::write::BzEncoder;
 use log::{debug, error, warn};
 use rayon::prelude::*;
 use tar::Header;
+use zstd::stream::write::Encoder;
 
 use crate::config::BackupConfig;
 use crate::core::{EmptyResult, GenericResult};
@@ -16,7 +15,7 @@ use crate::storage::metadata::{MetadataItem, Fingerprint, MetadataWriter};
 use crate::util::{self, hash::Hash};
 use crate::util::file_reader::{FileReader, EMPTY_FILE_HASH};
 
-type Archive = tar::Builder<BufWriter<BzEncoder<File>>>;
+type Archive = tar::Builder<BufWriter<Encoder<'static, File>>>;
 
 pub struct BackupInstance {
     path: PathBuf,
@@ -52,12 +51,12 @@ impl BackupInstance {
         ));
 
         let data_path = backup_path.join(Backup::DATA_NAME);
-        instance.data = Some(tar::Builder::new(BufWriter::new(
-            BzEncoder::new(
-                File::create(&data_path).map_err(|e| format!(
-                    "Failed to create {:?}: {}", data_path, e))?,
-                Compression::best(),
-            )
+        let data_file = File::create(&data_path).map_err(|e| format!(
+            "Failed to create {:?}: {}", data_path, e))?;
+
+        instance.data = Some(tar::Builder::new(BufWriter::with_capacity(
+            Encoder::<File>::recommended_input_size(),
+            Encoder::new(data_file, 10)?
         )));
 
         let (extern_hashes, last_state, ok) = load_backups_metadata(storage, &group);
