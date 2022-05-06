@@ -1,7 +1,7 @@
 mod backup;
 mod backuper;
 mod config;
-#[cfg(test)] mod filter;
+mod filter;
 
 use log::{info, error};
 
@@ -14,6 +14,7 @@ use self::backup::BackupInstance;
 use self::backuper::Backuper;
 
 pub use self::config::BackupItemConfig;
+pub use self::filter::PathFilter;
 
 pub fn backup(config: &BackupConfig) -> GenericResult<bool> {
     let storage = Storage::new_read_write(Filesystem::new(), &config.path);

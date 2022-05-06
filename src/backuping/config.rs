@@ -1,13 +1,18 @@
 use std::path::PathBuf;
 
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::Deserialize;
 
 use crate::core::GenericResult;
 
-#[derive(Serialize, Deserialize)]
+use super::filter::PathFilter;
+
+// FIXME(konishchev): Rewrite
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupItemConfig {
     pub path: String,
+    #[serde(default)]
+    pub filter: PathFilter,
 }
 
 impl BackupItemConfig {

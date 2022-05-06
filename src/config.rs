@@ -14,6 +14,7 @@ use validator::Validate;
 use crate::core::GenericResult;
 pub use crate::backuping::BackupItemConfig;
 
+// FIXME(konishchev): Rewrite
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -30,19 +31,19 @@ pub struct Config {
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
-    #[validate(length(min = 1))]
+    // #[validate(length(min = 1))]
     pub name: String,
     pub path: String,
-    #[validate(length(min = 1))]
+    // #[validate(length(min = 1))]
     pub items: Option<Vec<BackupItemConfig>>,
 
-    #[validate(range(min = 1))]
+    // #[validate(range(min = 1))]
     pub max_backup_groups: usize,
 
-    #[validate(range(min = 1))]
+    // #[validate(range(min = 1))]
     pub max_backups: usize,
 
-    #[validate]
+    // #[validate]
     pub upload: Option<UploadConfig>,
 }
 
@@ -80,7 +81,7 @@ pub enum ProviderConfig {
 
         # Test access token acquiring
         curl "https://api.dropbox.com/oauth2/token" -d grant_type=refresh_token -d "refresh_token=$refresh_token" -d "client_id=$client_id" -d "client_secret=$client_secret"
-         */
+        */
         client_id: String,
         client_secret: String,
         refresh_token: String,

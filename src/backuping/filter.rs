@@ -9,12 +9,13 @@ use serde::de::{Deserializer, Error};
 
 use crate::core::GenericResult;
 
+#[derive(Default)]
 pub struct PathFilter {
     rules: Vec<Rule>,
 }
 
 impl PathFilter {
-    fn new(spec: &str) -> GenericResult<PathFilter> {
+    pub fn new(spec: &str) -> GenericResult<PathFilter> {
         let mut rules = Vec::new();
 
         for line in spec.lines() {

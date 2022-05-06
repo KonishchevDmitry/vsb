@@ -10,13 +10,14 @@ use std::time::SystemTime;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use filetime::FileTime;
+use indoc::indoc;
 use itertools::Itertools;
 use log::info;
 use maplit::hashset;
 use sha2::Sha512;
 use nix::sys::stat::Mode;
 
-use crate::backuping;
+use crate::backuping::{self, PathFilter};
 use crate::config::{BackupConfig, BackupItemConfig};
 use crate::core::{GenericResult, EmptyResult};
 use crate::providers::{ReadProvider, filesystem::Filesystem};
@@ -31,20 +32,39 @@ fn backup() -> EmptyResult {
         easy_logging::init(module_path!().split("::").next().unwrap(), log::Level::Debug)?;
     }
 
-    let root_dir_name = PathBuf::from("src/tests/testdata/root");
-    let skipped_dir_name = root_dir_name.join("skipped");
-    let _git_restorer = RestoreGitFiles::new(&skipped_dir_name);
+    let mut git_restorer = GitRestorer::new();
+
+    let sources_path = std::env::current_dir()?;
+    let root_path = sources_path.join("src/tests/testdata/root");
+    let home_path = root_path.join("home");
+    let user_path = home_path.join("user");
+    let other_user_path = home_path.join("other-user");
+    let var_path = root_path.join("var");
+
+    let mut all_excluded_paths = Vec::new();
+    let mut all_excluded_files = Vec::new();
+
+    let skipped_path = var_path.join("skipped");
+    all_excluded_paths.push(skipped_path.clone());
+    all_excluded_files.push(skipped_path.join("some-file"));
+    git_restorer.add(&skipped_path)?;
+
+    let fully_excluded_path = user_path.join("fully-excluded");
+    all_excluded_paths.push(fully_excluded_path.clone());
+    all_excluded_files.push(fully_excluded_path.join("fully-excluded"));
+    git_restorer.add(&fully_excluded_path)?;
+
+    let partially_excluded_path = user_path.join("partially-excluded");
+    for name in ["excluded-1", "excluded-2"] {
+        let path = partially_excluded_path.join(name);
+        all_excluded_paths.push(path.clone());
+        all_excluded_files.push(path);
+    }
+    git_restorer.add(&partially_excluded_path)?;
 
     let temp_dir = TempDir::new()?;
     let backup_root_path = temp_dir.join("backups");
     fs::create_dir(&backup_root_path)?;
-
-    let sources_path = std::env::current_dir()?;
-    let root_path = sources_path.join(root_dir_name);
-    let home_path = root_path.join("home");
-    let user_path = home_path.join("user");
-    let other_user_path = home_path.join("other-user");
-    let skipped_path = sources_path.join(skipped_dir_name);
 
     let max_backup_groups = 2;
     let max_backups_per_group = 5;
@@ -58,11 +78,21 @@ fn backup() -> EmptyResult {
         max_backups: max_backups_per_group,
 
         items: Some(vec![BackupItemConfig {
+            path: root_path.join("etc").to_str().unwrap().to_owned(),
+            filter: PathFilter::default(),
+        }, BackupItemConfig {
             path: user_path.to_str().unwrap().to_owned(),
+            filter: PathFilter::new(indoc!("
+                - fully-excluded
+                + partially-excluded/included-*
+                - partially-excluded/*
+            "))?,
         }, BackupItemConfig {
             path: other_user_path.to_str().unwrap().to_owned(),
+            filter: PathFilter::default(),
         }, BackupItemConfig {
-            path: root_path.join("etc").to_str().unwrap().to_owned(),
+            path: var_path.join("data").to_str().unwrap().to_owned(),
+            filter: PathFilter::default(),
         }]),
         upload: None
     };
@@ -140,10 +170,9 @@ fn backup() -> EmptyResult {
         let backup = group.backups.last().unwrap();
         let files = read_metadata(storage.provider.read(), backup)?;
 
-        // FIXME(konishchev): Add filtered files here
-        for file in [&skipped_path] {
-            assert!(file.exists());
-            assert!(!files.contains_key(file));
+        for path in &all_excluded_files {
+            assert!(path.exists(), "{:?} doesn't exist", path);
+            assert!(!files.contains_key(path), "Metadata contains {:?}", path);
         }
         assert!(!files.contains_key(&user_path));
         assert!(files.contains_key(&mutable_file_path));
@@ -180,17 +209,30 @@ fn backup() -> EmptyResult {
         }
     }
 
+    let var_time = fs::metadata(&var_path)?.modified()?;
+    let partially_excluded_time = fs::metadata(&partially_excluded_path)?.modified()?;
+
+    for path in &all_excluded_paths {
+        if fs::symlink_metadata(path)?.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+    }
+
+    filetime::set_file_mtime(&var_path, FileTime::from_system_time(var_time))?;
+    filetime::set_file_mtime(&partially_excluded_path, FileTime::from_system_time(partially_excluded_time))?;
+
     let (groups, ok) = storage.get_backup_groups(true)?;
     assert!(ok);
     assert!(groups.iter().all(|group| group.temporary_backups.is_empty()));
-
-    let mut restore_pass = max_backups_per_group; // First group will be deleted as old
-    fs::remove_dir_all(skipped_path)?;
 
     info!("Restoring the following groups:");
     for group in &groups {
         info!("* {}: {}", group.name, group.backups.iter().map(|backup| &backup.name).join(", "));
     }
+
+    let mut restore_pass = max_backups_per_group; // First group has been deleted as old
 
     for group in groups {
         for backup in group.backups {
@@ -226,23 +268,30 @@ fn backup() -> EmptyResult {
     Ok(())
 }
 
-struct RestoreGitFiles(PathBuf);
+struct GitRestorer(Vec<PathBuf>);
 
-impl RestoreGitFiles {
-    fn new<P: AsRef<Path>>(path: P) -> GenericResult<RestoreGitFiles> {
-        let mut restorer = RestoreGitFiles(path.as_ref().to_owned());
-        restorer.restore()?;
-        Ok(restorer)
+impl GitRestorer {
+    fn new() -> GitRestorer {
+        GitRestorer(Vec::new())
     }
 
-    fn restore(&mut self) -> EmptyResult {
-        run(["git", "checkout", "--quiet", self.0.to_str().unwrap()])
+    fn add<P: AsRef<Path>>(&mut self, path: P) -> EmptyResult {
+        let path = path.as_ref();
+        GitRestorer::restore(path)?;
+        self.0.push(path.to_owned());
+        Ok(())
+    }
+
+    fn restore(path: &Path) -> EmptyResult {
+        run(["git", "checkout", "--quiet", path.to_str().unwrap()])
     }
 }
 
-impl Drop for RestoreGitFiles {
+impl Drop for GitRestorer {
     fn drop(&mut self) {
-        self.restore().unwrap();
+        for path in self.0.drain(..) {
+            GitRestorer::restore(&path).unwrap();
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use crate::config::{BackupConfig, BackupItemConfig};
 use crate::core::{EmptyResult, GenericError, GenericResult};
 use crate::util;
 
-use super::BackupInstance;
+use super::{BackupInstance, PathFilter};
 
 pub struct Backuper<'a> {
     items: &'a Vec<BackupItemConfig>,
@@ -40,7 +40,7 @@ impl<'a> Backuper<'a> {
     pub fn run(mut self) -> GenericResult<bool> {
         for item in self.items {
             match self.prepare(item) {
-                Ok(path) => self.backup_path(&path, true)?,
+                Ok(path) => self.backup_path(&path, Path::new(""), true, &item.filter)?,
                 Err(err) => self.handle_path_error(Path::new(&item.path), err)?,
             }
         }
@@ -62,7 +62,9 @@ impl<'a> Backuper<'a> {
         Ok(path)
     }
 
-    fn backup_path(&mut self, path: &Path, top_level: bool) -> EmptyResult {
+    fn backup_path(
+        &mut self, path: &Path, relative_path: &Path, top_level: bool, filter: &PathFilter,
+    ) -> EmptyResult {
         debug!("Backing up {:?}...", path);
 
         if let Err(err) = crate::storage::metadata::validate_path(path) {
@@ -85,7 +87,7 @@ impl<'a> Backuper<'a> {
         if file_type.is_file() {
             self.backup_file(path, top_level)?;
         } else if file_type.is_dir() {
-            self.backup_directory(path, top_level, metadata)?;
+            self.backup_directory(path, relative_path, top_level, filter, metadata)?;
         } else if file_type.is_symlink() {
             self.backup_symlink(path, top_level, metadata)?;
         } else if !top_level && (
@@ -145,7 +147,10 @@ impl<'a> Backuper<'a> {
         Ok(true)
     }
 
-    fn backup_directory(&mut self, path: &Path, top_level: bool, metadata: Metadata) -> EmptyResult {
+    fn backup_directory(
+        &mut self, path: &Path, relative_path: &Path, top_level: bool, filter: &PathFilter,
+        metadata: Metadata,
+    ) -> EmptyResult {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
             Err(err) => {
@@ -176,7 +181,19 @@ impl<'a> Backuper<'a> {
         }
 
         for name in names {
-            self.backup_path(&path.join(name), false)?;
+            let entry_path = path.join(&name);
+            let entry_relative_path = relative_path.join(&name);
+
+            match filter.check(&entry_relative_path) {
+                Ok(allow) => if allow {
+                    self.backup_path(&entry_path, &entry_relative_path, false, filter)?;
+                } else {
+                    debug!("Filtering out {:?}.", entry_path);
+                },
+                Err(err) => {
+                    self.handle_path_error(&entry_path, err)?;
+                }
+            }
         }
 
         Ok(())
