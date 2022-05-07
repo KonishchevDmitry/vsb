@@ -5,7 +5,7 @@ mod filter;
 
 use log::{info, error};
 
-use crate::config::BackupConfig;
+use crate::config::BackupSpecConfig;
 use crate::core::GenericResult;
 use crate::providers::filesystem::Filesystem;
 use crate::storage::Storage;
@@ -13,11 +13,14 @@ use crate::storage::Storage;
 use self::backup::BackupInstance;
 use self::backuper::Backuper;
 
-pub use self::config::BackupItemConfig;
+pub use self::config::{BackupConfig, BackupItemConfig};
 pub use self::filter::PathFilter;
 
-pub fn backup(config: &BackupConfig) -> GenericResult<bool> {
+pub fn backup(config: &BackupSpecConfig) -> GenericResult<bool> {
     let storage = Storage::new_read_write(Filesystem::new(), &config.path);
+
+    let config = config.backup.as_ref().ok_or(
+        "Backup rules aren't configured for the specified backup")?;
 
     let (backup, mut ok) = BackupInstance::create(config, &storage)?;
     ok &= Backuper::new(config, backup)?.run()?;

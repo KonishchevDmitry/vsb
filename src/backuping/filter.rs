@@ -3,7 +3,7 @@ use std::path::Path;
 
 use cow_utils::CowUtils;
 use globset::{GlobBuilder, GlobMatcher};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 #[cfg(test)] use serde_derive::Deserialize;
 use serde::de::{Deserializer, Error};
 
@@ -11,6 +11,7 @@ use crate::core::GenericResult;
 
 #[derive(Default)]
 pub struct PathFilter {
+    spec: String,
     rules: Vec<Rule>,
 }
 
@@ -24,7 +25,7 @@ impl PathFilter {
             }
         }
 
-        Ok(PathFilter {rules})
+        Ok(PathFilter {spec: spec.to_owned(), rules})
     }
 
     pub fn check(&self, path: &Path) -> GenericResult<bool> {
@@ -44,6 +45,12 @@ impl<'de> Deserialize<'de> for PathFilter {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let spec: String = Deserialize::deserialize(deserializer)?;
         PathFilter::new(&spec).map_err(D::Error::custom)
+    }
+}
+
+impl Serialize for PathFilter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        serializer.serialize_str(&self.spec)
     }
 }
 

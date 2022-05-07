@@ -30,7 +30,7 @@ pub struct BackupInstance {
 
 impl BackupInstance {
     pub fn create(config: &BackupConfig, storage: &Storage) -> GenericResult<(BackupInstance, bool)> {
-        let (group, backup) = storage.create_backup(config.max_backups)?;
+        let (group, backup) = storage.create_backup(config.max_backups_per_group)?;
         let mut instance = BackupInstance {
             path: storage.get_backup_path(&group.name, &backup.name, false).into(),
             temp_path: Some(backup.path.into()),

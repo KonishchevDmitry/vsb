@@ -10,7 +10,7 @@ use log::{debug, error, info, log_enabled};
 use nix::errno::Errno;
 use nix::fcntl::{self, FlockArg};
 
-use crate::config::{BackupConfig, Config, ProviderConfig};
+use crate::config::{BackupSpecConfig, Config, ProviderConfig};
 use crate::core::{EmptyResult, GenericResult};
 use crate::providers::dropbox::Dropbox;
 use crate::providers::filesystem::Filesystem;
@@ -58,7 +58,7 @@ fn acquire_lock(config_path: &str) -> GenericResult<File> {
     Ok(file)
 }
 
-fn sync_backups(backup_config: &BackupConfig) -> EmptyResult {
+fn sync_backups(backup_config: &BackupSpecConfig) -> EmptyResult {
     // FIXME(konishchev): Support
     let upload_config = backup_config.upload.as_ref().unwrap();
 

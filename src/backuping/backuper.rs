@@ -9,15 +9,14 @@ use log::{debug, warn, error};
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
 
-use crate::config::{BackupConfig, BackupItemConfig};
 use crate::core::{EmptyResult, GenericError, GenericResult};
 use crate::util;
 
-use super::{BackupInstance, PathFilter};
+use super::{BackupInstance, BackupConfig, BackupItemConfig, PathFilter};
 
 pub struct Backuper<'a> {
-    items: &'a Vec<BackupItemConfig>,
     backup: BackupInstance,
+    items: &'a Vec<BackupItemConfig>,
 
     roots: Vec<PathBuf>,
     root_parents: HashSet<PathBuf>,
@@ -26,11 +25,9 @@ pub struct Backuper<'a> {
 
 impl<'a> Backuper<'a> {
     pub fn new(config: &BackupConfig, backup: BackupInstance) -> GenericResult<Backuper> {
-        let items = config.items.as_ref().ok_or(
-            "Backup items aren't configured for the specified backup")?;
-
         Ok(Backuper {
-            items, backup,
+            backup,
+            items: &config.items,
             roots: Vec::new(),
             root_parents: HashSet::new(),
             ok: true,

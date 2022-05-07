@@ -18,7 +18,7 @@ use sha2::Sha512;
 use nix::sys::stat::Mode;
 
 use crate::backuping::{self, PathFilter};
-use crate::config::{BackupConfig, BackupItemConfig};
+use crate::config::{BackupSpecConfig, BackupConfig, BackupItemConfig};
 use crate::core::{GenericResult, EmptyResult};
 use crate::providers::{ReadProvider, filesystem::Filesystem};
 use crate::restoring::Restorer;
@@ -70,30 +70,30 @@ fn backup() -> EmptyResult {
     let max_backups_per_group = 5;
     let total_backups = (max_backup_groups + 1) * max_backups_per_group - 1;
 
-    let config = BackupConfig {
+    let config = BackupSpecConfig {
         name: "test".to_owned(),
         path: backup_root_path.to_str().unwrap().to_owned(),
-
-        max_backup_groups,
-        max_backups: max_backups_per_group,
-
-        items: Some(vec![BackupItemConfig {
-            path: root_path.join("etc").to_str().unwrap().to_owned(),
-            filter: PathFilter::default(),
-        }, BackupItemConfig {
-            path: user_path.to_str().unwrap().to_owned(),
-            filter: PathFilter::new(indoc!("
+        backup: Some(BackupConfig {
+            items: vec![BackupItemConfig {
+                path: root_path.join("etc").to_str().unwrap().to_owned(),
+                filter: PathFilter::default(),
+            }, BackupItemConfig {
+                path: user_path.to_str().unwrap().to_owned(),
+                filter: PathFilter::new(indoc!("
                 - fully-excluded
                 + partially-excluded/included-*
                 - partially-excluded/*
             "))?,
-        }, BackupItemConfig {
-            path: other_user_path.to_str().unwrap().to_owned(),
-            filter: PathFilter::default(),
-        }, BackupItemConfig {
-            path: var_path.join("data").to_str().unwrap().to_owned(),
-            filter: PathFilter::default(),
-        }]),
+            }, BackupItemConfig {
+                path: other_user_path.to_str().unwrap().to_owned(),
+                filter: PathFilter::default(),
+            }, BackupItemConfig {
+                path: var_path.join("data").to_str().unwrap().to_owned(),
+                filter: PathFilter::default(),
+            }],
+            max_backup_groups,
+            max_backups_per_group,
+        }),
         upload: None
     };
 

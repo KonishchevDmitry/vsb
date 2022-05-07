@@ -12,38 +12,34 @@ use serde_derive::Deserialize;
 use validator::Validate;
 
 use crate::core::GenericResult;
+
+pub use crate::backuping::BackupConfig;
 pub use crate::backuping::BackupItemConfig;
 
-// FIXME(konishchev): Rewrite
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
     pub path: String,
+
     #[validate]
-    pub backups: Vec<BackupConfig>,
+    #[serde(default)]
+    pub backups: Vec<BackupSpecConfig>,
 
     // FIXME(konishchev): Rewrite
     pub prometheus_metrics: Option<String>,
 }
 
-// FIXME(konishchev): Rewrite
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct BackupConfig {
-    // #[validate(length(min = 1))]
+pub struct BackupSpecConfig {
+    #[validate(length(min = 1))]
     pub name: String,
+    #[validate(length(min = 1))]
     pub path: String,
-    // #[validate(length(min = 1))]
-    pub items: Option<Vec<BackupItemConfig>>,
-
-    // #[validate(range(min = 1))]
-    pub max_backup_groups: usize,
-
-    // #[validate(range(min = 1))]
-    pub max_backups: usize,
-
-    // #[validate]
+    #[validate]
+    pub backup: Option<BackupConfig>,
+    #[validate]
     pub upload: Option<UploadConfig>,
 }
 
@@ -113,6 +109,7 @@ impl Config {
 
             backup.path = validate_local_path(&backup.path)?;
 
+            // FIXME(konishchev): Rewrite
             if let Some(upload) = backup.upload.as_mut() {
                 upload.src = validate_local_path(&upload.src)?;
                 upload.dst = validate_path(&upload.dst)?;
@@ -134,7 +131,7 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_backup(&self, name: &str) -> GenericResult<&BackupConfig> {
+    pub fn get_backup(&self, name: &str) -> GenericResult<&BackupSpecConfig> {
         for backup in &self.backups {
             if backup.name == name {
                 return Ok(backup);
@@ -150,7 +147,7 @@ fn validate_path(path: &str) -> GenericResult<String> {
     let mut path_components = Path::new(path).components();
 
     if path_components.next() != Some(Component::RootDir) {
-        return Err!("Paths must be absolute");
+        return Err!("Invalid path: {:?}. It must be absolute", path);
     }
     normalized_path.push(Component::RootDir.as_os_str());
 
@@ -158,7 +155,7 @@ fn validate_path(path: &str) -> GenericResult<String> {
         if let Component::Normal(component) = component {
             normalized_path.push(component);
         } else {
-            return Err!("Invalid path: {}", path);
+            return Err!("Invalid path: {:?}", path);
         }
     }
 

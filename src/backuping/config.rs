@@ -1,15 +1,28 @@
 use std::path::PathBuf;
 
-use serde_derive::Deserialize;
+use serde_derive::{Serialize, Deserialize};
+use validator::Validate;
 
 use crate::core::GenericResult;
 
 use super::filter::PathFilter;
 
-// FIXME(konishchev): Rewrite
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct BackupConfig {
+    #[validate]
+    #[validate(length(min = 1))]
+    pub items: Vec<BackupItemConfig>,
+    #[validate(range(min = 1))]
+    pub max_backup_groups: usize,
+    #[validate(range(min = 1))]
+    pub max_backups_per_group: usize,
+}
+
+#[derive(Deserialize, Serialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct BackupItemConfig {
+    #[validate(length(min = 1))]
     pub path: String,
     #[serde(default)]
     pub filter: PathFilter,
