@@ -26,6 +26,8 @@ pub struct BackupItemConfig {
     pub path: String,
     #[serde(default)]
     pub filter: PathFilter,
+    pub before: Option<String>,
+    pub after: Option<String>,
 }
 
 impl BackupItemConfig {

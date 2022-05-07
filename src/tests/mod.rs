@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, Permissions};
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use filetime::FileTime;
-use indoc::indoc;
+use indoc::{indoc, formatdoc};
 use itertools::Itertools;
 use log::info;
 use maplit::hashset;
@@ -62,6 +62,16 @@ fn backup() -> EmptyResult {
     }
     git_restorer.add(&partially_excluded_path)?;
 
+    let before_path = other_user_path.join("before");
+    let after_path = other_user_path.join("after");
+    for path in [&before_path, &after_path] {
+        fs::remove_file(path).or_else(|e| if e.kind() == ErrorKind::NotFound {
+            Ok(())
+        } else {
+            Err(e)
+        })?;
+    }
+
     let temp_dir = TempDir::new()?;
     let backup_root_path = temp_dir.join("backups");
     fs::create_dir(&backup_root_path)?;
@@ -76,20 +86,26 @@ fn backup() -> EmptyResult {
         backup: Some(BackupConfig {
             items: vec![BackupItemConfig {
                 path: root_path.join("etc").to_str().unwrap().to_owned(),
-                filter: PathFilter::default(),
+                filter: PathFilter::default(), before: None, after: None,
             }, BackupItemConfig {
                 path: user_path.to_str().unwrap().to_owned(),
                 filter: PathFilter::new(indoc!("
-                - fully-excluded
-                + partially-excluded/included-*
-                - partially-excluded/*
-            "))?,
+                    - fully-excluded
+                    + partially-excluded/included-*
+                    - partially-excluded/*
+                "))?,
+                before: None, after: None,
             }, BackupItemConfig {
                 path: other_user_path.to_str().unwrap().to_owned(),
                 filter: PathFilter::default(),
+                before: Some(formatdoc!("
+                    date +%T.%N > {before:?}
+                    cp -a {before:?} {after:?}
+                ", before=before_path, after=after_path)),
+                after: Some(format!("date +%T.%N > {:?}", after_path)),
             }, BackupItemConfig {
                 path: var_path.join("data").to_str().unwrap().to_owned(),
-                filter: PathFilter::default(),
+                filter: PathFilter::default(), before: None, after: None,
             }],
             max_backup_groups,
             max_backups_per_group,
@@ -140,7 +156,7 @@ fn backup() -> EmptyResult {
     for pass in 0..total_backups {
         info!("Backup #{} pass...", pass);
 
-        mutable_files_states.push(vec![
+        let mut mutable_files_state = vec![
             FileState::new(&mutable_file_path, Some(format!("pass-{}", pass)))?,
             FileState::new(&same_mutable_orig_file_path, Some(format!("same-pass-{}", pass)))?,
             FileState::new(&same_mutable_extern_file_path, Some(format!("same-pass-{}", pass)))?,
@@ -155,9 +171,18 @@ fn backup() -> EmptyResult {
             } else {
                 None
             })?,
-        ]);
+        ];
 
         assert!(backuping::backup(&config)?);
+
+        // `after` contents was the same as `before` during backup, but must be different now
+        let before_state = FileState::acquire(&before_path)?;
+        let mut after_state = FileState::acquire(&after_path)?;
+        assert_ne!(after_state.contents, before_state.contents);
+        after_state.contents = before_state.contents.clone();
+
+        mutable_files_state.extend([before_state, after_state]);
+        mutable_files_states.push(mutable_files_state);
 
         let (groups, ok) = storage.get_backup_groups(true)?;
         assert!(ok);
@@ -178,12 +203,14 @@ fn backup() -> EmptyResult {
         assert!(files.contains_key(&mutable_file_path));
 
         let always_unique = hashset! {
+            &after_path,
             &mutable_file_path,
             &same_mutable_orig_file_path,
             &periodically_existing_file_path,
         };
 
         let always_extern = hashset! {
+            before_path.clone(),
             user_path.join("empty"),
             user_path.join("other-empty"),
             user_path.join("same-contents-2"),
@@ -191,10 +218,22 @@ fn backup() -> EmptyResult {
         };
 
         for (path, file) in files {
-            let metadata = fs::symlink_metadata(&path)?;
+            // `after` contents was the same as `before` during backup, but must be different now
+            let data_path = if path == after_path {
+                before_path.clone()
+            } else {
+                path.clone()
+            };
+
+            let metadata = fs::symlink_metadata(&data_path)?;
             assert!(metadata.is_file());
             assert_eq!(file.size, metadata.len());
-            assert_eq!(file.fingerprint, Fingerprint::new(&metadata));
+
+            let mut fingerprint = Fingerprint::new(&metadata);
+            if path == after_path {
+                fingerprint.inode = fs::symlink_metadata(&path)?.ino();
+            }
+            assert_eq!(file.fingerprint, fingerprint);
 
             let expected_unique =
                 pass % max_backups_per_group == 0 && !always_extern.contains(&path) ||
@@ -203,7 +242,7 @@ fn backup() -> EmptyResult {
                 always_unique.contains(&path);
             assert_eq!(file.unique, expected_unique, "{}: unique={}", path.display(), file.unique);
 
-            let data = fs::read(&path)?;
+            let data = fs::read(&data_path)?;
             let hash: Hash = Sha512::digest(&data).as_slice().into();
             assert_eq!(file.hash, hash, "Invalid {:?} hash", path);
         }
@@ -321,6 +360,17 @@ impl FileState {
 
         Ok(FileState {
             path: path.to_owned(), contents,
+            parent_path: parent_path.to_owned(),
+            parent_modify_time: fs::metadata(parent_path)?.modified()?,
+        })
+    }
+
+    fn acquire(path: &Path) -> GenericResult<FileState> {
+        let parent_path = path.parent().ok_or_else(|| format!("Invalid file path: {:?}", path))?;
+
+        Ok(FileState {
+            path: path.to_owned(),
+            contents: Some((fs::read_to_string(path)?, fs::metadata(path)?.modified()?)),
             parent_path: parent_path.to_owned(),
             parent_modify_time: fs::metadata(parent_path)?.modified()?,
         })

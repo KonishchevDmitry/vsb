@@ -58,7 +58,10 @@ impl MetadataItem {
 #[derive(Debug, PartialEq)]
 pub struct Fingerprint {
     device: u64,
+    #[cfg(not(test))]
     inode: u64,
+    #[cfg(test)]
+    pub inode: u64,
     mtime_nsec: i128,
 }
 

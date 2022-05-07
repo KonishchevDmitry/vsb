@@ -3,6 +3,7 @@ use std::fs::{self, Metadata, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, FileTypeExt};
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 use itertools::Itertools;
 use log::{debug, warn, error};
@@ -36,10 +37,21 @@ impl<'a> Backuper<'a> {
 
     pub fn run(mut self) -> GenericResult<bool> {
         for item in self.items {
-            match self.prepare(item) {
-                Ok(path) => self.backup_path(&path, Path::new(""), true, &item.filter)?,
-                Err(err) => self.handle_path_error(Path::new(&item.path), err)?,
+            if let Some(ref command) = item.before {
+                self.run_command(&item.path, "before", command)?;
             }
+
+            let result = match self.prepare(item) {
+                Ok(path) => self.backup_path(&path, Path::new(""), true, &item.filter),
+                Err(err) => self.handle_path_error(Path::new(&item.path), err),
+            };
+
+            let after_result = item.after.as_ref().map(|command| {
+                self.run_command(&item.path, "after", command)
+            }).transpose();
+
+            result?;
+            after_result?;
         }
 
         self.backup.finish()?;
@@ -57,6 +69,24 @@ impl<'a> Backuper<'a> {
 
         self.roots.push(path.clone());
         Ok(path)
+    }
+
+    fn run_command(&mut self, path: &str, name: &str, command: &str) -> EmptyResult {
+        debug!("Executing `{}` command for {:?}...", name, path);
+
+        match Command::new("bash").arg("-c").arg(command).status() {
+            Ok(status) => if !status.success() {
+                return self.handle_error(format_args!(
+                    "`{}` command for {:?} exited with error", name, path));
+            },
+            Err(err) => {
+                return self.handle_error(format_args!(
+                    "Failed to execute `{}` command for {:?}: {}", name, path, err));
+            }
+        }
+
+        debug!("`{}` command for {:?} has succeeded.", name, path);
+        Ok(())
     }
 
     fn backup_path(
@@ -173,7 +203,7 @@ impl<'a> Backuper<'a> {
         }
 
         // To make tests predictable
-        if cfg!(debug_assertions) {
+        if cfg!(test) {
             names.sort();
         }
 
