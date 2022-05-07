@@ -78,8 +78,7 @@ impl BackupGroup {
 
             let backup_name = match traits.name_regex.captures(stripped_file_name) {
                 Some(captures) if file.type_ == traits.file_type => {
-                    // captures.name("name").unwrap().as_str()
-                    captures.get(0).unwrap().as_str()
+                    captures.name("name").unwrap().as_str()
                 },
                 None if file.name.starts_with('.') => {
                     // Assume OS-dependent hidden file
