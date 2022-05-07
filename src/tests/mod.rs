@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use filetime::FileTime;
-use indoc::{indoc, formatdoc};
+use indoc::indoc;
 use itertools::Itertools;
 use log::info;
 use maplit::hashset;
@@ -98,10 +98,9 @@ fn backup() -> EmptyResult {
             }, BackupItemConfig {
                 path: other_user_path.to_str().unwrap().to_owned(),
                 filter: PathFilter::default(),
-                before: Some(formatdoc!("
-                    uuidgen > {before:?}
-                    cp -a {before:?} {after:?}
-                ", before=before_path, after=after_path)),
+                before: Some(format!(
+                    "uuidgen > {before:?} && cp -a {before:?} {after:?}",
+                    before=before_path, after=after_path)),
                 after: Some(format!("uuidgen > {:?}", after_path)),
             }, BackupItemConfig {
                 path: var_path.join("data").to_str().unwrap().to_owned(),
