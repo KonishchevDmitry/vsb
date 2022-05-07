@@ -5,6 +5,9 @@ filter: |
   
   - Downloads
   
+  - star/*
+  - dot-star/.*
+  
   - .investments/db.sqlite
   - .ssh/*.socket
   - .vim/{bundle,view}
@@ -12,6 +15,7 @@ filter: |
   + .vscode/ssh
   - .vscode/*
   
+  - src/*/**/vendor
   - src/project/**/buildtools/{darwin,linux}-bin
   - src/**/.vagrant/machines/default/virtualbox/*.vdi
 

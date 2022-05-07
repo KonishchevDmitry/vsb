@@ -161,6 +161,13 @@ mod tests {
         case("Downloads/some-file", true), // But we won't get there because of blacklisted parent directory
         case("Other/Downloads", true),
 
+        case("star", true),
+        case("star/file", false),
+        case("star/.file", false),
+        case("dot-star", true),
+        case("dot-star/file", true),
+        case("dot-star/.file", false),
+
         case(".investments", true),
         case(".investments/db.sqlite", false),
         case(".investments/config.yaml", true),
@@ -180,6 +187,10 @@ mod tests {
         case(".vscode/extensions", false),
 
         case("src/project", true),
+
+        case("src/vendor", true),
+        case("src/project/vendor", false),
+        case("src/project/sub-project/vendor", false),
 
         case("src/project/dir", true),
         case("src/project/dir/sub-project", true),
