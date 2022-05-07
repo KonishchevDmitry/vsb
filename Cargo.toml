@@ -1,11 +1,18 @@
 [package]
 name = "vsb"
-version = "0.4.0"
 edition = "2021"
-authors = ["Dmitry Konishchev"]
+version = "0.4.0"
 license = "GPL-3.0+"
-description = "Very simple in configuring, but powerful backup tool (work in progress)"
+keywords = ["backup", "deduplication"]
+categories = ["command-line-utilities", "filesystem"]
+description = "Very simple in configuring, but powerful backup tool"
 exclude = ["/src/tests/testdata"]
+
+authors = ["Dmitry Konishchev <konishchev@gmail.com>"]
+homepage = "https://github.com/KonishchevDmitry/vsb"
+repository = "https://github.com/KonishchevDmitry/vsb"
+documentation = "https://github.com/KonishchevDmitry/vsb"
+readme = "README.md"
 
 [dependencies]
 bytes = "1.1.0"
