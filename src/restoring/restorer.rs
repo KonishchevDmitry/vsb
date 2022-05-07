@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use easy_logging::GlobalContext;
 use itertools::Itertools;
-use log::{error, info};
+use log::{error, debug};
 use tar::{Entry, EntryType, Header};
 
 use crate::core::{EmptyResult, GenericResult};
@@ -178,12 +178,13 @@ impl Restorer {
         Ok(ok)
     }
 
+    // FIXME(konishchev): Workaround too many open files here
     fn restore_files(
         &mut self, source_path: &Path, mut entry: Entry<Box<dyn Read>>, info: &RestoringFile,
         restore_dir: &Path, is_target: bool,
     ) -> EmptyResult {
         let paths = info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
-        info!("Restoring {}...", paths);
+        debug!("Restoring {}...", paths);
 
         let mut files = Vec::new();
         let mut restore_metadata = None;

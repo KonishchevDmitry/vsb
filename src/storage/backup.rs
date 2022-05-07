@@ -98,12 +98,6 @@ impl Backup {
     pub fn inspect(
         &mut self, provider: &dyn ReadProvider, available_hashes: &mut HashSet<Hash>,
     ) -> GenericResult<bool> {
-        // FIXME(konishchev): Tests
-        // if cfg!(debug_assertions) {
-        //     warn!("Skip consistency check of {:?}: running in develop mode.", metadata_path);
-        //     return Ok(true);
-        // }
-
         let mut recoverable = true;
         let mut stat = BackupInnerStat {
             extern_files: 0,
