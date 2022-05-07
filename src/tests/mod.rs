@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use assert_fs::fixture::TempDir;
 use digest::Digest;
 use filetime::FileTime;
-use indoc::indoc;
+use indoc::{indoc, formatdoc};
 use itertools::Itertools;
 use log::info;
 use maplit::hashset;
@@ -286,11 +286,24 @@ fn backup() -> EmptyResult {
 
             let restored_root_path = get_restore_path(&restore_dir, &root_path);
 
-            let ls_tree_command = "ls -ARl --time-style +%Y.%m.%d-%H:%M:%S";
-            shell(&format!(
-                "set -o pipefail && diff -u <(cd {:?} && {}) <(cd {:?} && {})",
-                root_path, ls_tree_command, restored_root_path, ls_tree_command
-            ))?;
+            shell(&formatdoc!(r#"
+                set -eu
+
+                lstree() {{
+                    local time_style_flag="--time-style"
+
+                    if [[ "$(uname)" = Darwin && "$(which ls)" = /bin/ls ]]; then
+                        time_style_flag="-D"
+                    fi
+
+                    ls -ARl "$time_style_flag" +%Y.%m.%d-%H:%M:%S
+                }}
+
+                expected="$(cd {root_path:?} && lstree)"
+                actual="$(cd {restored_path:?} && lstree)"
+
+                diff -u <(cat <<< "$expected") <(cat <<< "$actual")
+            "#, root_path=root_path, restored_path=restored_root_path))?;
 
             run(["git", "diff", "--no-index", root_path.to_str().unwrap(), restored_root_path.to_str().unwrap()])?;
 
@@ -404,7 +417,7 @@ fn run<C: IntoIterator<Item=A>, A: AsRef<OsStr>>(command: C) -> EmptyResult {
 }
 
 fn shell(command: &str) -> EmptyResult {
-    run(["bash", "-ec", command])
+    run(["bash", "-c", command])
 }
 
 fn get_restore_path(restore_dir: &Path, path: &Path) -> PathBuf {
