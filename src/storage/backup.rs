@@ -31,8 +31,8 @@ pub struct BackupOuterStat {
 }
 
 impl Backup {
-    pub const METADATA_NAME: &'static str = "metadata.bz2";
-    pub const DATA_NAME: &'static str = "data.tar.bz2"; // FIXME(konishchev): Variations
+    pub const DATA_NAME: &'static str = "data.tar.zst";
+    pub const METADATA_NAME: &'static str = "metadata.zst";
 
     pub fn new(path: &str, name: &str) -> Backup {
         Backup {
@@ -58,26 +58,12 @@ impl Backup {
             .map(|file| (file.name, file.size))
             .collect();
 
-        let metadata_size = if let Some(size) = backup_files.get(Backup::METADATA_NAME).copied() {
-            backup.metadata_path.replace(format!("{}/{}", path, Backup::METADATA_NAME));
-            size
-        } else {
-            return Err!("The backup is corrupted: metadata file is missing");
-        };
+        let data_size = *backup_files.get(Backup::DATA_NAME).ok_or(
+            "The backup is corrupted: data file is missing")?;
 
-        let mut has_data = false;
-        let mut data_size = None;
-
-        for &data_name in &["data.tar.gz", "data.tar.bz2", "data.tar.7z"] {
-            if let Some(size) = backup_files.get(data_name).copied() {
-                data_size = size;
-                has_data = true;
-                break;
-            }
-        }
-        if !has_data {
-            return Err!("The backup is corrupted: backup data file is missing")
-        }
+        let metadata_size = *backup_files.get(Backup::METADATA_NAME).ok_or(
+            "The backup is corrupted: metadata file is missing")?;
+        backup.metadata_path.replace(format!("{}/{}", path, Backup::METADATA_NAME));
 
         if let (Some(metadata_size), Some(data_size)) = (metadata_size, data_size) {
             backup.outer_stat.replace(BackupOuterStat {metadata_size, data_size});
@@ -91,19 +77,21 @@ impl Backup {
             "The backup has no metadata file")?;
 
         let file = provider.open_file(path).map_err(|e| format!(
-            "Unable to open metadata file: {}", e))?;
+            "Unable to open {:?}: {}", path, e))?;
 
         Ok(MetadataReader::new(file))
     }
 
-    // FIXME(konishchev): Rewrite
     pub fn read_data(&self, provider: &dyn ReadProvider) -> GenericResult<Archive<Box<dyn Read>>> {
-        let path = self.path.clone() + "/" + Backup::DATA_NAME;
-        let file = provider.open_file(&path)?;
+        let path = format!("{}/{}", self.path, Backup::DATA_NAME);
+        let file = provider.open_file(&path).map_err(|e| format!(
+            "Unable to open {:?}: {}", path, e))?;
+
         let reader = Box::new(BufReader::with_capacity(
             Decoder::<Box<dyn BufRead>>::recommended_output_size(),
             Decoder::new(file)?,
         ));
+
         Ok(Archive::new(reader))
     }
 

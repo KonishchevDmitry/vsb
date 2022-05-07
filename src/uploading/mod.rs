@@ -1,6 +1,7 @@
 mod check;
 mod metrics;
 mod sync;
+mod config;
 
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
@@ -10,23 +11,27 @@ use log::{debug, error, info, log_enabled};
 use nix::errno::Errno;
 use nix::fcntl::{self, FlockArg};
 
-use crate::config::{BackupSpecConfig, Config, ProviderConfig};
+use crate::config::Config;
 use crate::core::{EmptyResult, GenericResult};
 use crate::providers::dropbox::Dropbox;
 use crate::providers::filesystem::Filesystem;
 use crate::providers::google_drive::GoogleDrive;
 use crate::storage::{BackupGroup, Storage};
 
+pub use config::{UploadConfig, ProviderConfig};
+
 pub fn upload(config: &Config) -> GenericResult<bool> {
     let mut ok = true;
     let _lock = acquire_lock(&config.path)?;
 
-    for backup in config.backups.iter() {
-        let _context = GlobalContext::new(&backup.name);
+    for backup in &config.backups {
+        if let Some(upload_config) = backup.upload.as_ref() {
+            let _context = GlobalContext::new(&backup.name);
 
-        if let Err(err) = sync_backups(backup) {
-            error!("Sync failed: {}.", err);
-            ok = false;
+            if let Err(err) = sync_backups(&backup.name, &backup.path, upload_config) {
+                error!("Sync failed: {}.", err);
+                ok = false;
+            }
         }
     }
 
@@ -40,6 +45,7 @@ pub fn upload(config: &Config) -> GenericResult<bool> {
     Ok(ok)
 }
 
+// FIXME(konishchev): Use for also for backup
 fn acquire_lock(config_path: &str) -> GenericResult<File> {
     let file = File::open(config_path).map_err(|e| format!(
         "Unable to open {:?}: {}", config_path, e))?;
@@ -58,24 +64,21 @@ fn acquire_lock(config_path: &str) -> GenericResult<File> {
     Ok(file)
 }
 
-fn sync_backups(backup_config: &BackupSpecConfig) -> EmptyResult {
-    // FIXME(konishchev): Support
-    let upload_config = backup_config.upload.as_ref().unwrap();
-
-    let local_storage = Storage::new_read_only(Filesystem::new(), &upload_config.src);
+fn sync_backups(name: &str, path: &str, config: &UploadConfig) -> EmptyResult {
+    let local_storage = Storage::new_read_only(Filesystem::new(), path);
     let (local_backup_groups, local_ok) = get_backup_groups(&local_storage, true)?;
     check::check_backups(&local_storage, &local_backup_groups,
-                         local_ok, upload_config.max_time_without_backups);
+                         local_ok, config.max_time_without_backups);
 
-    if let Err(err) = metrics::collect(&backup_config.name, &local_backup_groups) {
+    if let Err(err) = metrics::collect(name, &local_backup_groups) {
         error!("Failed to collect metrics: {}.", err);
     }
 
-    let cloud_storage = match upload_config.provider {
+    let cloud_storage = match config.provider {
         ProviderConfig::Dropbox {ref client_id, ref client_secret, ref refresh_token} =>
-            Storage::new_upload(Dropbox::new(client_id, client_secret, refresh_token)?, &upload_config.dst),
+            Storage::new_upload(Dropbox::new(client_id, client_secret, refresh_token)?, &config.path),
         ProviderConfig::GoogleDrive {ref client_id, ref client_secret, ref refresh_token} =>
-            Storage::new_upload(GoogleDrive::new(client_id, client_secret, refresh_token), &upload_config.dst),
+            Storage::new_upload(GoogleDrive::new(client_id, client_secret, refresh_token), &config.path),
     };
     let (cloud_backup_groups, cloud_ok) = get_backup_groups(&cloud_storage, false)?;
 
@@ -83,7 +86,7 @@ fn sync_backups(backup_config: &BackupSpecConfig) -> EmptyResult {
     let sync_ok = sync::sync_backups(
         &local_storage, &local_backup_groups,
         &cloud_storage, &cloud_backup_groups, local_ok && cloud_ok,
-        upload_config.max_backup_groups, &upload_config.encryption_passphrase);
+        config.max_backup_groups, &config.encryption_passphrase);
 
     let (cloud_backup_groups, cloud_ok) = match get_backup_groups(&cloud_storage, false) {
         Ok(result) => result,
@@ -93,7 +96,7 @@ fn sync_backups(backup_config: &BackupSpecConfig) -> EmptyResult {
         },
     };
     check::check_backups(&cloud_storage, &cloud_backup_groups,
-                         sync_ok && cloud_ok, upload_config.max_time_without_backups);
+                         sync_ok && cloud_ok, config.max_time_without_backups);
 
     Ok(())
 }
