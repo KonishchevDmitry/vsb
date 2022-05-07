@@ -99,10 +99,10 @@ fn backup() -> EmptyResult {
                 path: other_user_path.to_str().unwrap().to_owned(),
                 filter: PathFilter::default(),
                 before: Some(formatdoc!("
-                    date +%T.%N > {before:?}
+                    uuidgen > {before:?}
                     cp -a {before:?} {after:?}
                 ", before=before_path, after=after_path)),
-                after: Some(format!("date +%T.%N > {:?}", after_path)),
+                after: Some(format!("uuidgen > {:?}", after_path)),
             }, BackupItemConfig {
                 path: var_path.join("data").to_str().unwrap().to_owned(),
                 filter: PathFilter::default(), before: None, after: None,
