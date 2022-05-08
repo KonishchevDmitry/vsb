@@ -21,7 +21,7 @@ use crate::backuping::{self, PathFilter};
 use crate::config::{BackupSpecConfig, BackupConfig, BackupItemConfig};
 use crate::core::{GenericResult, EmptyResult};
 use crate::providers::{ReadProvider, filesystem::Filesystem};
-use crate::restoring::Restorer;
+use crate::restoring;
 use crate::storage::{Backup, Storage};
 use crate::storage::metadata::{Fingerprint, MetadataItem};
 use crate::util::hash::Hash;
@@ -274,11 +274,10 @@ fn backup() -> EmptyResult {
 
     for group in groups {
         for backup in group.backups {
-            info!("Restore #{} pass ({})...", restore_pass, backup.name);
-            let restore_dir = temp_dir.join("restore");
+            info!("Restoring #{} pass ({})...", restore_pass, backup.name);
 
-            let restorer = Restorer::new(Path::new(&backup.path))?;
-            assert!(restorer.restore(&restore_dir)?);
+            let restore_dir = temp_dir.join("restore");
+            assert!(restoring::restore(Path::new(&backup.path), &restore_dir)?);
 
             for file_state in &mutable_files_states[restore_pass] {
                 file_state.restore()?;
