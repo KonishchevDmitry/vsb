@@ -9,6 +9,7 @@ use crate::config::BackupSpecConfig;
 use crate::core::GenericResult;
 use crate::providers::filesystem::Filesystem;
 use crate::storage::Storage;
+use crate::util::sys::acquire_lock;
 
 use self::backup::BackupInstance;
 use self::backuper::Backuper;
@@ -17,6 +18,7 @@ pub use self::config::{BackupConfig, BackupItemConfig};
 pub use self::filter::PathFilter;
 
 pub fn backup(config: &BackupSpecConfig) -> GenericResult<bool> {
+    let _lock = acquire_lock(&config.path)?;
     let storage = Storage::new_read_write(Filesystem::new(), &config.path);
 
     let config = config.backup.as_ref().ok_or(

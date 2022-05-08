@@ -3,13 +3,8 @@ mod metrics;
 mod sync;
 mod config;
 
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
-
 use easy_logging::GlobalContext;
 use log::{debug, error, info, log_enabled};
-use nix::errno::Errno;
-use nix::fcntl::{self, FlockArg};
 
 use crate::config::Config;
 use crate::core::{EmptyResult, GenericResult};
@@ -17,6 +12,7 @@ use crate::providers::dropbox::Dropbox;
 use crate::providers::filesystem::Filesystem;
 use crate::providers::google_drive::GoogleDrive;
 use crate::storage::{BackupGroup, Storage};
+use crate::util::sys::acquire_lock;
 
 pub use config::{UploadConfig, ProviderConfig};
 
@@ -43,25 +39,6 @@ pub fn upload(config: &Config) -> GenericResult<bool> {
     }
 
     Ok(ok)
-}
-
-// FIXME(konishchev): Use for also for backup
-fn acquire_lock(config_path: &str) -> GenericResult<File> {
-    let file = File::open(config_path).map_err(|e| format!(
-        "Unable to open {:?}: {}", config_path, e))?;
-
-    fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|e| {
-        if e == Errno::EAGAIN {
-            format!(concat!(
-                "Unable to exclusively run the program for {:?} configuration file: ",
-                "it's already locked by another process",
-            ), config_path)
-        } else {
-            format!("Unable to flock() {:?}: {}", config_path, e)
-        }
-    })?;
-
-    Ok(file)
 }
 
 fn sync_backups(name: &str, path: &str, config: &UploadConfig) -> EmptyResult {
