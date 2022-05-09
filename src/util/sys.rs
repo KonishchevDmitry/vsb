@@ -1,7 +1,7 @@
 use std::io;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, IntoRawFd};
 use std::path::{Path, Component};
 use std::thread;
 use std::time::{self, Duration};
@@ -39,6 +39,17 @@ pub fn fsync_directory(path: &Path) -> io::Result<()> {
     let mut open_options = OpenOptions::new();
     open_options.read(true).custom_flags(OFlag::O_NOFOLLOW.bits());
     open_options.open(path)?.sync_all()
+}
+
+// To be sure that data at least will be written. Used when we don't want fsync.
+pub fn close_file(file: File) -> nix::Result<()> {
+    unistd::close(file.into_raw_fd()).or_else(|err| {
+        if err == Errno::EINTR {
+            Ok(())
+        } else {
+            Err(err)
+        }
+    })
 }
 
 pub fn spawn_thread<F, T>(name: &str, f: F) -> GenericResult<thread::JoinHandle<T>>

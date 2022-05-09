@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::Write;
 
+use crate::util::sys;
+
 pub struct MultiWriter {
     files: Vec<File>,
 }
@@ -8,6 +10,13 @@ pub struct MultiWriter {
 impl MultiWriter {
     pub fn new(files: Vec<File>) -> MultiWriter {
         MultiWriter {files}
+    }
+
+    pub fn close(self) -> nix::Result<()> {
+        for file in self.files {
+            sys::close_file(file)?;
+        }
+        Ok(())
     }
 }
 
