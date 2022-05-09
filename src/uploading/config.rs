@@ -52,6 +52,19 @@ pub enum ProviderConfig {
 
     #[serde(rename = "google_drive")]
     GoogleDrive {
+        /*
+        How to obtain the credentials (see https://developers.google.com/identity/protocols/oauth2/native-app):
+
+        Enable Google Drive API - https://console.developers.google.com/
+        Create OAuth client - https://console.developers.google.com/apis/credentials
+
+        client_id=...
+        client_secret=...
+        open "https://accounts.google.com/o/oauth2/v2/auth?scope=https://www.googleapis.com/auth/drive&response_type=code&redirect_uri=urn:ietf:wg:oauth:2.0:oob&client_id=$client_id"
+
+        code=...
+        curl https://oauth2.googleapis.com/token -d grant_type=authorization_code -d "client_id=$client_id" -d "client_secret=$client_secret" -d "code=$code" -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
+        */
         client_id: String,
         client_secret: String,
         refresh_token: String,
