@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use log::error;
+use log::{error, info};
 
 use crate::core::{GenericError, GenericResult};
 use crate::storage::{Storage, Backup};
@@ -34,6 +34,8 @@ impl RestorePlan {
         let mut steps = Vec::new();
         let mut extern_files: HashSet<PathBuf> = HashSet::new();
         let mut to_find: HashMap<Hash, Vec<PathBuf>> = HashMap::new();
+
+        info!("Building restoring plan...");
 
         for backup in group.backups.into_iter().rev() {
             if steps.is_empty() && backup.name != backup_name {

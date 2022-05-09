@@ -1,19 +1,21 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fs::OpenOptions;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::unix::{self, fs::OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use easy_logging::GlobalContext;
+use humansize::{file_size_opts, FileSize};
 use itertools::Itertools;
-use log::{error, debug};
+use log::{error, info, debug};
 use tar::{Entry, EntryType, Header};
 
 use crate::core::{EmptyResult, GenericResult};
 use crate::providers::filesystem::Filesystem;
 use crate::storage::{Storage, StorageRc};
 use crate::util::file_reader::FileReader;
+use crate::util::sys;
 
 use super::file_metadata::{FileMetadata, Owner};
 use super::multi_writer::MultiWriter;
@@ -88,6 +90,12 @@ impl Restorer {
         util::create_directory(restore_dir)?;
 
         for (index, step) in plan.steps.iter().enumerate() {
+            let total_size: u64 = step.files.values().map(|file| file.size).sum();
+
+            info!("Restoring data from {:?} backup ({} unique files {} total)...",
+                step.backup.name, step.files.len(),
+                total_size.file_size(file_size_opts::BINARY).unwrap());
+
             let _context = GlobalContext::new(&step.backup.name);
             ok &= self.process_step(step, index == 0, restore_dir).map_err(|e| format!(
                 "Failed to restore {:?} backup: {}", step.backup.path, e))?;
@@ -178,23 +186,38 @@ impl Restorer {
         Ok(ok)
     }
 
-    // FIXME(konishchev): Workaround too many open files here
     fn restore_files(
         &mut self, source_path: &Path, mut entry: Entry<Box<dyn Read>>, info: &RestoringFile,
         restore_dir: &Path, is_target: bool,
     ) -> EmptyResult {
-        let paths = info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
-        debug!("Restoring {}...", paths);
+        let paths = || info.paths.iter().map(|path| format!("{:?}", path)).join(", ");
+        debug!("Restoring {}...", paths());
 
         let mut files = Vec::new();
         let mut restore_metadata = None;
+
+        let header = entry.header().clone();
+        let mut reader = FileReader::new(&mut entry, info.size);
+
+        // We may have a lot of tiny files with the same contents, so do this optimization to reduce
+        // chances of exceeded open descriptors limit.
+        #[cfg(test)] const TINY_FILE_SIZE: u64 = 10;
+        #[cfg(not(test))] const TINY_FILE_SIZE: u64 = 4096;
+        let data = if info.size <= TINY_FILE_SIZE {
+            let mut data = Vec::with_capacity(info.size.try_into().unwrap());
+            reader.read_to_end(&mut data).map_err(|e| format!(
+                "Error while reading {:?} data from archive: {}", source_path, e))?;
+            Some(data)
+        } else {
+            None
+        };
 
         for path in &info.paths {
             let restore_path = get_restore_path(restore_dir, path)?;
 
             if is_target {
                 if path == source_path {
-                    let metadata = self.get_file_metadata(entry.header())?;
+                    let metadata = self.get_file_metadata(&header)?;
                     assert!(restore_metadata.replace((restore_path.clone(), metadata)).is_none());
                 } else {
                     self.pre_created_directories.extend(util::restore_directories(restore_dir, path)?);
@@ -204,28 +227,42 @@ impl Restorer {
                 self.restored_extern_files.insert(self.pending_extern_files.take(path).unwrap());
             }
 
-            files.push(OpenOptions::new()
+            let mut file = OpenOptions::new()
                 .create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).write(true)
-                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?);
+                .open(&restore_path).map_err(|e| format!("Unable to create {:?}: {}", restore_path, e))?;
+
+            if let Some(ref data) = data {
+                file.write_all(data).map_err(|e| format!(
+                    "Failed to restore {:?}: {}", path, e))?;
+
+                sys::close_file(file).map_err(|e| format!(
+                    "Failed to restore {:?}: {}", path, e))?;
+            } else {
+                files.push(file);
+            }
         }
 
-        let mut files = MultiWriter::new(files);
-        let mut reader = FileReader::new(&mut entry, info.size);
+        if data.is_none() {
+            let mut files = MultiWriter::new(files);
 
-        io::copy(&mut reader, &mut files).map_err(|e| format!(
-            "Failed to restore {}: {}", paths, e))?;
+            io::copy(&mut reader, &mut files).map_err(|e| format!(
+                "Failed to restore {}: {}", paths(), e))?;
+
+            files.close().map_err(|e| format!(
+                "Failed to restore {}: {}", paths(), e))?;
+        }
+
         let (bytes_read, hash) = reader.consume();
-
         if bytes_read != info.size {
             return Err!(
                 "Failed to restore {}: got an unexpected data size: {} vs {}",
-                paths, bytes_read, info.size);
+                paths(), bytes_read, info.size);
         }
 
         if hash != info.hash {
             return Err!(
                 "Failed to restore {}: the restored data has an unexpected hash: {} vs {}",
-                paths, hash, info.hash);
+                paths(), hash, info.hash);
         }
 
         if let Some((path, metadata)) = restore_metadata {
