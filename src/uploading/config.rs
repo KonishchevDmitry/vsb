@@ -60,10 +60,14 @@ pub enum ProviderConfig {
 
         client_id=...
         client_secret=...
-        open "https://accounts.google.com/o/oauth2/v2/auth?scope=https://www.googleapis.com/auth/drive&response_type=code&redirect_uri=urn:ietf:wg:oauth:2.0:oob&client_id=$client_id"
+        open "https://accounts.google.com/o/oauth2/v2/auth?scope=https://www.googleapis.com/auth/drive&access_type=offline&response_type=code&redirect_uri=urn:ietf:wg:oauth:2.0:oob&client_id=$client_id"
 
         code=...
         curl https://oauth2.googleapis.com/token -d grant_type=authorization_code -d "client_id=$client_id" -d "client_secret=$client_secret" -d "code=$code" -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
+
+        But, since June 2022 it's not usable because obtained refresh token has expire time of 7 days
+        if your application is in Testing mode, but to publish the application you must go through
+        review process which implies that you have real application for end users.
         */
         client_id: String,
         client_secret: String,
