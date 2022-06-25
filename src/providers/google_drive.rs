@@ -233,7 +233,7 @@ impl GoogleDrive {
     }
 
     fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> Result<HttpRequest<'a, R, E>, GoogleDriveError> {
-        self.oauth.authenticate(request).map_err(|e| GoogleDriveError::Oauth(e.to_string()))
+        self.oauth.authenticate(request, "Bearer").map_err(|e| GoogleDriveError::Oauth(e.to_string()))
     }
 
     fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>

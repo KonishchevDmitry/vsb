@@ -40,11 +40,11 @@ impl OauthClient {
         }
     }
 
-    pub fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>) -> GenericResult<HttpRequest<'a, R, E>> {
+    pub fn authenticate<'a, R, E>(&self, request: HttpRequest<'a, R, E>, scheme: &str) -> GenericResult<HttpRequest<'a, R, E>> {
         let access_token = self.get_access_token().map_err(|e| format!(
             "Unable obtain OAuth token: {}", e))?;
 
-        Ok(request.with_header(headers::AUTHORIZATION, format!("Bearer {}", access_token))
+        Ok(request.with_header(headers::AUTHORIZATION, format!("{} {}", scheme, access_token))
             .map_err(|_| "Got an invalid OAuth token")?)
     }
 

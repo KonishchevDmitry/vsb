@@ -80,7 +80,7 @@ impl Dropbox {
     }
 
     fn send_request<O>(&self, request: HttpRequest<O, ApiError>) -> Result<O, HttpClientError<ApiError>> {
-        let request = self.oauth.authenticate(request).map_err(|e|
+        let request = self.oauth.authenticate(request, "Bearer").map_err(|e|
             HttpClientError::Generic(e.to_string()))?;
         self.client.send(request)
     }
