@@ -28,7 +28,9 @@ impl HttpClient {
     pub fn new() -> HttpClient {
         HttpClient {
             default_headers: Headers::new(),
-        }.with_default_header(headers::USER_AGENT, "pyvsb-to-cloud").unwrap()
+        }.with_default_header(
+            headers::USER_AGENT, "vsb (https://github.com/KonishchevDmitry/vsb)",
+        ).unwrap()
     }
 
     pub fn with_default_header<V: AsRef<str>>(mut self, name: HeaderName, value: V) -> GenericResult<HttpClient> {
@@ -99,13 +101,16 @@ impl HttpClient {
         let mut body = Vec::new();
         response.copy_to(&mut body)?;
 
-        trace!("Got {} response: {}", status,
+        if status == StatusCode::NO_CONTENT {
+            trace!("Got {} response.", status);
+        } else {
+            trace!("Got {} response: {}", status,
                String::from_utf8_lossy(&body).trim_end_matches('\n'));
+        }
 
         Ok(HttpResponse {
-            status: status,
+            status, body,
             headers: response.headers().clone(),
-            body: body,
         })
     }
 }
