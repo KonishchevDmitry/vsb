@@ -69,7 +69,12 @@ impl Parser {
                     .help("Path to restore the backup to")
                     .required(true)))
 
-            .subcommand(new_command("upload", "Upload backups to cloud"))
+            .subcommand(new_command(
+                "upload", "Upload backups to cloud")
+                .arg(Arg::new("skip_verify")
+                    .long("skip-verify")
+                    .help("Skip backup verification before uploading")))
+
             .get_matches();
 
         let log_level = match matches.occurrences_of("verbose") {
@@ -104,7 +109,9 @@ impl Parser {
                 restore_path: PathBuf::from(matches.value_of("RESTORE_PATH").unwrap()),
             },
 
-            "upload" => Action::Upload,
+            "upload" => Action::Upload {
+                verify: !matches.is_present("skip_verify"),
+            },
 
             _ => unreachable!(),
         })

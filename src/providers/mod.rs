@@ -1,6 +1,8 @@
 pub mod dropbox;
 pub mod filesystem;
 pub mod google_drive;
+pub mod yandex_disk;
+
 mod oauth;
 
 use std::fmt;

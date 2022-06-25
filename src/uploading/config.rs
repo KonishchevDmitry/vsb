@@ -50,7 +50,7 @@ pub enum ProviderConfig {
         refresh_token: String,
     },
 
-    #[serde(rename = "google_drive")]
+    #[serde(rename = "google-drive")]
     GoogleDrive {
         /*
         How to obtain the credentials (see https://developers.google.com/identity/protocols/oauth2/native-app):
@@ -68,6 +68,27 @@ pub enum ProviderConfig {
         But, since June 2022 it's not usable because obtained refresh token has expire time of 7 days
         if your application is in Testing mode, but to publish the application you must go through
         review process which implies that you have real application for end users.
+        */
+        client_id: String,
+        client_secret: String,
+        refresh_token: String,
+    },
+
+    #[serde(rename = "yandex-disk")]
+    YandexDisk {
+        /*
+        How to obtain the credentials:
+
+        Register the application - https://oauth.yandex.ru/
+        Callback URL: https://oauth.yandex.ru/verification_code
+
+        client_id=...
+        client_secret=...
+        device_name=Server
+        open "https://oauth.yandex.ru/authorize?response_type=code&client_id=$client_id&device_name=$device_name"
+
+        code=...
+        curl https://oauth.yandex.ru/token -d grant_type=authorization_code -d "client_id=$client_id" -d "client_secret=$client_secret" -d "code=$code"
         */
         client_id: String,
         client_secret: String,

@@ -51,6 +51,6 @@ fn run(global: GlobalOptions, parser: Parser) -> GenericResult<bool> {
     match parser.parse()? {
         Action::Backup {name} => backuping::backup(config.get_backup(&name)?),
         Action::Restore {backup_path, restore_path} => restoring::restore(&backup_path, &restore_path),
-        Action::Upload => uploading::upload(&config),
+        Action::Upload {verify} => uploading::upload(&config, verify),
     }
 }
