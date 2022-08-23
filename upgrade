@@ -3,8 +3,9 @@
 # Upgrades all dependencies to the latest versions
 #
 
-set -eu
+set -eux
 
 command -v cargo-upgrade > /dev/null || cargo install cargo-edit
 cargo upgrade
 cargo update
+cargo clean
