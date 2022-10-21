@@ -6,7 +6,7 @@ use std::os::unix::{self, fs::OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use easy_logging::GlobalContext;
-use humansize::{file_size_opts, FileSize};
+use humansize::{self, SizeFormatter};
 use itertools::Itertools;
 use log::{error, info, debug};
 use tar::{Entry, EntryType, Header};
@@ -94,7 +94,7 @@ impl Restorer {
 
             info!("Restoring data from {:?} backup ({} unique files {} total)...",
                 step.backup.name, step.files.len(),
-                total_size.file_size(file_size_opts::BINARY).unwrap());
+                SizeFormatter::new(total_size, humansize::BINARY));
 
             let _context = GlobalContext::new(&step.backup.name);
             ok &= self.process_step(step, index == 0, restore_dir).map_err(|e| format!(
