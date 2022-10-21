@@ -16,7 +16,7 @@ pub use crate::uploading::UploadConfig;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
-    pub path: String,
+    pub path: PathBuf,
     #[validate]
     #[serde(default)]
     pub backups: Vec<BackupSpecConfig>,
@@ -38,7 +38,7 @@ pub struct BackupSpecConfig {
 }
 
 impl Config {
-    pub fn load(path: &str) -> GenericResult<Config> {
+    pub fn load(path: &Path) -> GenericResult<Config> {
         let mut data = Vec::new();
         File::open(path)?.read_to_end(&mut data)?;
 

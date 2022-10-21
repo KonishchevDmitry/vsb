@@ -43,7 +43,7 @@ impl RestorePlan {
             }
 
             let map_read_error = |error: GenericError| -> String {
-                return format!("Error while reading {:?} backup metadata: {}", backup.path, error);
+                format!("Error while reading {:?} backup metadata: {}", backup.path, error)
             };
 
             let mut to_restore = HashMap::new();
