@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, SeekFrom, BufWriter, Seek};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf, Component};
 
 use log::{debug, error, warn};
@@ -46,12 +47,12 @@ impl BackupInstance {
 
         let metadata_path = backup_path.join(Backup::METADATA_NAME);
         instance.metadata = Some(MetadataWriter::new(
-            File::create(&metadata_path).map_err(|e| format!(
+            create_file(&metadata_path).map_err(|e| format!(
                 "Failed to create {:?}: {}", metadata_path, e))?
         ));
 
         let data_path = backup_path.join(Backup::DATA_NAME);
-        let data_file = File::create(&data_path).map_err(|e| format!(
+        let data_file = create_file(&data_path).map_err(|e| format!(
             "Failed to create {:?}: {}", data_path, e))?;
 
         instance.data = Some(tar::Builder::new(BufWriter::with_capacity(
@@ -166,6 +167,14 @@ impl Drop for BackupInstance {
             }
         }
     }
+}
+
+fn create_file(path: &Path) -> GenericResult<File> {
+    Ok(OpenOptions::new()
+        .create_new(true)
+        .mode(0o600)
+        .write(true)
+        .open(path)?)
 }
 
 fn tar_path(path: &Path) -> GenericResult<&Path> {

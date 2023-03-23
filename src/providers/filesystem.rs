@@ -1,5 +1,6 @@
-use std::fs;
+use std::fs::{self, DirBuilder};
 use std::io::{self, ErrorKind};
+use std::os::unix::fs::DirBuilderExt;
 
 use crate::core::{EmptyResult, GenericResult};
 
@@ -71,7 +72,7 @@ impl ReadProvider for Filesystem {
 
 impl WriteProvider for Filesystem {
     fn create_directory(&self, path: &str) -> EmptyResult {
-        Ok(fs::create_dir(path)?)
+        Ok(DirBuilder::new().mode(0o700).create(path)?)
     }
 
     fn delete(&self, path: &str) -> EmptyResult {

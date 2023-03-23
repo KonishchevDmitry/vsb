@@ -358,7 +358,7 @@ impl FileState {
         let parent_path = path.parent().ok_or_else(|| format!("Invalid file path: {:?}", path))?;
 
         let contents = if let Some(contents) = contents {
-            fs::write(&path, &contents)?;
+            fs::write(path, &contents)?;
             Some((contents, fs::metadata(path)?.modified()?))
         } else {
             if let Err(err) = fs::remove_file(path) {
