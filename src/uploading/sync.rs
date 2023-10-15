@@ -95,7 +95,7 @@ fn get_target_backup_groups<'a>(
     let mut target_groups = get_group_to_backups_mapping(local_groups);
 
     for group in cloud_groups {
-        target_groups.entry(&group.name).or_insert_with(BTreeSet::new).extend(
+        target_groups.entry(&group.name).or_default().extend(
             group.backups.iter().map(|backup| backup.name.as_str()));
     }
 

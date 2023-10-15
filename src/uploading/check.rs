@@ -9,15 +9,15 @@ pub fn check_backups(storage: &Storage, backup_groups: &[BackupGroup], consisten
     let mut last_backup = None;
 
     for group in backup_groups {
-        if group.backups.is_empty() {
+        if let Some(backup) = group.backups.iter().next_back() {
+            last_backup = Some(backup);
+        } else {
             let error = format!("{} has an empty {:?} backup group.", storage.name(), group.name);
             if consistent {
                 error!("{}", error);
             } else {
                 warn!("{}", error);
             }
-        } else {
-            last_backup = Some(group.backups.iter().rev().next().unwrap());
         }
     }
 

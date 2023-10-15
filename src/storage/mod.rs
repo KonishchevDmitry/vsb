@@ -8,7 +8,7 @@ mod traits;
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use chrono::{self, offset::Local, TimeZone};
+use chrono::{self, offset::Local, NaiveDateTime, TimeZone};
 use log::{info, warn, error};
 use rayon::prelude::*;
 
@@ -202,8 +202,9 @@ impl Storage {
     }
 
     pub fn get_backup_time(&self, backup_name: &str) -> GenericResult<SystemTime> {
-        let backup_time = Local.datetime_from_str(backup_name, self.backup_traits().name_format)
-            .map_err(|_| format!("Invalid backup name: {:?}", backup_name))?;
+        let backup_time = NaiveDateTime::parse_from_str(backup_name, self.backup_traits().name_format).ok()
+            .and_then(|date_time| Local.from_local_datetime(&date_time).single())
+            .ok_or_else(|| format!("Invalid backup name: {:?}", backup_name))?;
 
         Ok(SystemTime::from(backup_time))
     }
