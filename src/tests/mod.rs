@@ -123,7 +123,7 @@ fn backup() -> EmptyResult {
 
     // Check permissions preserving for files
     let permissions_file_path = permissions_dir_path.join("permissions");
-    fs::set_permissions(&permissions_file_path, Permissions::from_mode((
+    fs::set_permissions(permissions_file_path, Permissions::from_mode((
         Mode::from_bits(0o404).unwrap() | Mode::S_ISUID | Mode::S_ISGID | Mode::S_ISVTX
     ).bits().into()))?;
 

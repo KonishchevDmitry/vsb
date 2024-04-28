@@ -155,7 +155,7 @@ impl io::Write for Encryptor {
 fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     let (read_fd, write_fd) = unistd::pipe2(fcntl::OFlag::O_CLOEXEC).map(|(read_fd, write_fd)| {
         unsafe {
-            (File::from_raw_fd(read_fd), File::from_raw_fd(write_fd))
+            (File::from_raw_fd(read_fd.as_raw_fd()), File::from_raw_fd(write_fd.as_raw_fd()))
         }
     })?;
 
@@ -168,7 +168,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
 fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     let (read_fd, write_fd) = unistd::pipe().map(|(read_fd, write_fd)| {
         unsafe {
-            (File::from_raw_fd(read_fd), File::from_raw_fd(write_fd))
+            (File::from_raw_fd(read_fd.as_raw_fd()), File::from_raw_fd(write_fd.as_raw_fd()))
         }
     })?;
 

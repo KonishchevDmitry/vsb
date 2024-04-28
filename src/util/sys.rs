@@ -1,7 +1,7 @@
 use std::io;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, IntoRawFd};
+use std::os::unix::io::IntoRawFd;
 use std::path::{Path, Component};
 use std::thread;
 use std::time::{self, Duration};
@@ -9,7 +9,7 @@ use std::time::{self, Duration};
 use libc::pid_t;
 use log::{debug, error};
 use nix::errno::Errno;
-use nix::fcntl::{self, FlockArg, OFlag};
+use nix::fcntl::{Flock, FlockArg, OFlag};
 use nix::{sys, unistd};
 
 use crate::core::{EmptyResult, GenericResult};
@@ -19,20 +19,18 @@ pub fn is_root_path(path: &Path) -> bool {
     components.next() == Some(Component::RootDir) && components.next().is_none()
 }
 
-pub fn acquire_lock<P: AsRef<Path>>(path: P) -> GenericResult<File> {
+pub fn acquire_lock<P: AsRef<Path>>(path: P) -> GenericResult<Flock<File>> {
     let path = path.as_ref();
     let file = File::open(path).map_err(|e| format!(
         "Unable to open {:?}: {}", path, e))?;
 
-    fcntl::flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|err| {
+    Ok(Flock::lock(file, FlockArg::LockExclusiveNonblock).map_err(|(_file, err)| {
         if err == Errno::EAGAIN {
             format!("Unable to acquire an exclusive lock on {:?}: it's already locked by another process", path)
         } else {
             format!("Unable to flock() {:?}: {}", path, err)
         }
-    })?;
-
-    Ok(file)
+    })?)
 }
 
 pub fn fsync_directory(path: &Path) -> io::Result<()> {

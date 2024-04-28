@@ -9,7 +9,7 @@ use validator::Validate;
 use crate::core::GenericResult;
 
 pub use crate::backuping::BackupConfig;
-pub use crate::backuping::BackupItemConfig;
+#[cfg(test)] pub use crate::backuping::BackupItemConfig;
 pub use crate::uploading::UploadConfig;
 
 #[derive(Deserialize, Validate)]
@@ -17,7 +17,7 @@ pub use crate::uploading::UploadConfig;
 pub struct Config {
     #[serde(skip)]
     pub path: PathBuf,
-    #[validate]
+    #[validate(nested)]
     #[serde(default)]
     pub backups: Vec<BackupSpecConfig>,
     #[validate(length(min = 1))]
@@ -31,9 +31,9 @@ pub struct BackupSpecConfig {
     pub name: String,
     #[validate(length(min = 1))]
     pub path: String,
-    #[validate]
+    #[validate(nested)]
     pub backup: Option<BackupConfig>,
-    #[validate]
+    #[validate(nested)]
     pub upload: Option<UploadConfig>,
 }
 

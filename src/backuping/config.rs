@@ -10,7 +10,7 @@ use super::filter::PathFilter;
 #[derive(Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
-    #[validate]
+    #[validate(nested)]
     #[validate(length(min = 1))]
     pub items: Vec<BackupItemConfig>,
     #[validate(range(min = 1))]

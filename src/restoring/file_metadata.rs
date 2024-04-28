@@ -27,7 +27,7 @@ impl FileMetadata {
         if let Some(owner) = self.owner {
             nix::unistd::fchownat(
                 None, path, Some(Uid::from_raw(owner.uid)), Some(Gid::from_raw(owner.gid)),
-                FchownatFlags::NoFollowSymlink,
+                FchownatFlags::AT_SYMLINK_NOFOLLOW,
             ).map_err(|e| format!("Unable to change {:?} ownership: {}", path, e))?;
         };
 

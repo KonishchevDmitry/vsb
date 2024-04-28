@@ -14,7 +14,7 @@ use reqwest::blocking::Client;
 use crate::core::GenericResult;
 
 pub use reqwest::{Method, StatusCode};
-pub use reqwest::header::{HeaderMap as Headers, HeaderName, HeaderValue};
+pub use reqwest::header::{HeaderMap as Headers, HeaderName};
 pub use self::body::*;
 pub use self::request::*;
 pub use self::response::*;

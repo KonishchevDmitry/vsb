@@ -273,7 +273,7 @@ impl<'a> Backuper<'a> {
         &mut self, path: &Path, top_level: bool, err: io::Error, type_change_errno: Option<Errno>,
     ) -> EmptyResult {
         if let (Some(type_change_errno), Some(errno)) = (type_change_errno, err.raw_os_error()) {
-            if Errno::from_i32(errno) == type_change_errno {
+            if Errno::from_raw(errno) == type_change_errno {
                 return self.handle_type_change(path, top_level);
             }
         }
