@@ -1,44 +1,12 @@
 #!/usr/bin/env bash
 #
-# Checks code with clippy linter
+# Checks code with clippy linter and runs tests
 #
 
 set -eu
 
-get_lint_args() {
-    local action="$1"
-    local lints="$2"
+for profile in dev release; do
+    cargo clippy --workspace --all-targets --all-features --no-deps --profile "$profile" -- -Dwarnings
+done
 
-    sed -r '
-    s/\s*#.*//
-    /^\s*$/d
-    s/^\s*(.*)/'"$action"' clippy::\1/
-    ' <<< "$lints"
-}
-
-check() {
-    local args="$1"
-    local lints="$2"
-    cargo clippy $args --all-features -- -Dwarnings $(get_lint_args -A "$lints")
-}
-
-main() {
-    local blacklist
-
-    # A workaround to force recheck
-    touch src/main.rs
-
-    blacklist='
-        collapsible-else-if
-        derive-partial-eq-without-eq
-        redundant-field-names
-        new-ret-no-self
-    '
-    check --bins "$blacklist"
-    check '--bins --release' "$blacklist"
-    check --tests "$blacklist"
-
-    cargo test
-}
-
-main
+cargo test

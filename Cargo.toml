@@ -14,6 +14,13 @@ repository = "https://github.com/KonishchevDmitry/vsb"
 documentation = "https://github.com/KonishchevDmitry/vsb"
 readme = "README.md"
 
+[lints.clippy]
+collapsible-else-if = "allow"
+derive-partial-eq-without-eq = "allow"
+redundant-field-names = "allow"
+redundant_guards = "allow"
+new-ret-no-self = "allow"
+
 [dependencies]
 bytes = "1.5.0"
 chrono = "0.4.31"
