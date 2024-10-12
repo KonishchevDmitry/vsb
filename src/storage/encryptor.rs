@@ -53,9 +53,8 @@ impl Encryptor {
 
         let stdout_reader = util::sys::spawn_thread("gpg stdout reader", move || {
             stdout_reader(gpg, hasher, tx)
-        }).map_err(|e| {
+        }).inspect_err(|_| {
             terminate_gpg(pid);
-            e
         })?;
 
         let encryptor = Encryptor {
@@ -196,10 +195,9 @@ fn stdout_reader(mut gpg: Child, hasher: Box<dyn Hasher>, tx: DataSender) -> Gen
         }
     })?);
 
-    let hash = read_data(stdout, hasher, tx).map_err(|err| {
+    let hash = read_data(stdout, hasher, tx).inspect_err(|_| {
         terminate_gpg(gpg.id() as i32); // To close gpg's stderr
         util::sys::join_thread_ignoring_result(stderr_reader.take().unwrap());
-        err
     })?;
 
     util::sys::join_thread(stderr_reader.take().unwrap())?;

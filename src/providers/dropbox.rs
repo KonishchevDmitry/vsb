@@ -321,6 +321,6 @@ impl Error for ApiError {
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Dropbox API error: {}", self.error_summary.trim_end_matches(|c| c == '.' || c == '/'))
+        write!(f, "Dropbox API error: {}", self.error_summary.trim_end_matches(['.', '/']))
     }
 }

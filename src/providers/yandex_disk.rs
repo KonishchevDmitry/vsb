@@ -91,12 +91,11 @@ impl YandexDisk {
             return Err!("Checksum mismatch");
         }
 
-        self.rename_file(temp_path, path, false).map_err(|err| {
+        self.rename_file(temp_path, path, false).inspect_err(|_| {
             if let Err(err) = self.delete(temp_path) {
                 error!("Failed to delete a temporary {:?} file from {}: {}.",
                     temp_path, self.name(), err);
             }
-            err
         })
     }
 
