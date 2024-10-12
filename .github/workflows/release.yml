@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+jobs:
+  test:
+    name: Test
+    uses: KonishchevDmitry/vsb/.github/workflows/test.yml@master
+
+  build:
+    name: Build for ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          # See https://bit.ly/github-runners for actual runners
+
+          - name: Linux
+            os: ubuntu-latest
+
+          - name: Intel MacOS
+            os: macos-13
+
+          - name: ARM MacOS
+            os: macos-14
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure build target
+      run: .github/configure-build-target
+
+    - name: Build
+      env:
+        CARGO_TERM_COLOR: always
+      run: cargo build --release --locked
+
+    - name: Check the binary
+      run: .github/check-binary release
+
+    - name: Create archive
+      id: archive
+      run: |
+        set -eu
+
+        name="vsb-${{ runner.os }}-${{ runner.arch }}-${{ github.ref_name }}.tar.bz2"
+        name="$(tr '[:upper:]' '[:lower:]' <<< "$name")"
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+
+        build_directory="target/${CARGO_BUILD_TARGET:-}/release"
+        sudo chown 0:0 "$build_directory/vsb"
+
+        tar -cjf "$name" -C "$build_directory" vsb
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.os }}
+        path: ${{ steps.archive.outputs.name }}
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+
+  publish:
+    name: Publish
+
+    needs: [test, build]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        pattern: "*"
+        merge-multiple: true
+
+    - name: Create release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        tag: ${{ github.ref }}
+        file: artifacts/*
+        file_glob: true
