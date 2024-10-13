@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, BufReader, BufRead, Write, BufWriter};
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -153,9 +153,7 @@ impl io::Write for Encryptor {
 #[cfg(not(target_os = "macos"))]
 fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     let (read_fd, write_fd) = unistd::pipe2(fcntl::OFlag::O_CLOEXEC).map(|(read_fd, write_fd)| {
-        unsafe {
-            (File::from_raw_fd(read_fd.as_raw_fd()), File::from_raw_fd(write_fd.as_raw_fd()))
-        }
+        (File::from(read_fd), File::from(write_fd))
     })?;
 
     fcntl::fcntl(read_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
@@ -166,9 +164,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
 #[cfg(target_os = "macos")]
 fn create_passphrase_pipe() -> nix::Result<(File, File)> {
     let (read_fd, write_fd) = unistd::pipe().map(|(read_fd, write_fd)| {
-        unsafe {
-            (File::from_raw_fd(read_fd.as_raw_fd()), File::from_raw_fd(write_fd.as_raw_fd()))
-        }
+        (File::from(read_fd), File::from(write_fd))
     })?;
 
     fcntl::fcntl(write_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::FD_CLOEXEC))?;
