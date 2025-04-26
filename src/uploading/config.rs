@@ -104,7 +104,7 @@ fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::
 
 struct DurationVisitor;
 
-impl<'de> Visitor<'de> for DurationVisitor {
+impl Visitor<'_> for DurationVisitor {
     type Value = Option<Duration>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

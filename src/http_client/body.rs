@@ -13,7 +13,7 @@ pub enum Body {
     Stream(ChunkStream),
 }
 
-impl<'a> From<&'a str> for Body {
+impl From<&'_ str> for Body {
     fn from(data: &str) -> Self {
         Body::String(data.to_owned())
     }

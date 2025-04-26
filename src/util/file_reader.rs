@@ -19,7 +19,7 @@ pub struct FileReader<'a> {
     truncated: bool,
 }
 
-impl<'a> FileReader<'a> {
+impl FileReader<'_> {
     pub fn new(file: &mut dyn Read, size: u64) -> FileReader {
         FileReader {
             file,
@@ -36,7 +36,7 @@ impl<'a> FileReader<'a> {
     }
 }
 
-impl<'a> Read for FileReader<'a> {
+impl Read for FileReader<'_> {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         if self.bytes_left < buf.len() as u64 {
             buf = &mut buf[..self.bytes_left as usize]
@@ -76,14 +76,14 @@ mod tests {
 
     #[test]
     fn file_reader() {
-        let mut random = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut data = vec![0_u8; 1024 * 1024];
-        random.fill_bytes(&mut data);
+        rng.fill_bytes(&mut data);
 
         let file_sizes: Vec<usize> =
             [0, data.len()].into_iter()
-            .chain(std::iter::repeat_with(|| random.gen_range(1..data.len())).take(10))
+            .chain(std::iter::repeat_with(|| rng.random_range(1..data.len())).take(10))
             .collect();
 
         let test = |file_mock: &[u8], file_size: usize| {
@@ -91,7 +91,7 @@ mod tests {
 
             let mut result_data: Vec<u8> = Vec::with_capacity(file_size);
             let expected_data: Vec<u8> = file_mock.iter().cloned()
-                .chain(std::iter::repeat(0).take(file_size - file_mock.len())).collect();
+                .chain(std::iter::repeat_n(0, file_size - file_mock.len())).collect();
 
             let mut reader = file_mock.reader();
             let mut file_reader = FileReader::new(&mut reader, file_size as u64);
@@ -108,7 +108,7 @@ mod tests {
 
         file_sizes.into_par_iter().for_each(|file_size| {
             let file_mock = &data[..file_size];
-            [0, rand::thread_rng().gen_range(1..=data.len())].into_par_iter().for_each(|truncated_size| {
+            [0, rand::rng().random_range(1..=data.len())].into_par_iter().for_each(|truncated_size| {
                 test(file_mock, file_size + truncated_size);
             })
         })
