@@ -205,10 +205,8 @@ impl ReadProvider for YandexDisk {
                 fields: "type,_embedded.items.type,_embedded.items.name,_embedded.items.size,_embedded.offset,_embedded.total",
             });
 
-            if let Err(HttpClientError::Api(ref e)) = response {
-                if e.error == "DiskNotFoundError" {
-                    return Ok(None);
-                }
+            if let Err(HttpClientError::Api(ref e)) = response && e.error == "DiskNotFoundError" {
+                return Ok(None);
             }
 
             let response: Response = response?;

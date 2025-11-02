@@ -29,10 +29,8 @@ impl ReadProvider for Filesystem {
     fn list_directory(&self, path: &str) -> GenericResult<Option<Vec<File>>> {
         let entries = fs::read_dir(path);
 
-        if let Err(ref err) = entries {
-            if err.kind() == ErrorKind::NotFound {
-                return Ok(None);
-            }
+        if let Err(ref err) = entries && err.kind() == ErrorKind::NotFound {
+            return Ok(None);
         }
 
         let mut files = Vec::new();

@@ -3,6 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use filetime::FileTime;
+use nix::fcntl::AT_FDCWD;
 use nix::unistd::{Uid, Gid, FchownatFlags};
 
 use crate::core::EmptyResult;
@@ -26,19 +27,19 @@ impl FileMetadata {
 
         if let Some(owner) = self.owner {
             nix::unistd::fchownat(
-                None, path, Some(Uid::from_raw(owner.uid)), Some(Gid::from_raw(owner.gid)),
+                AT_FDCWD, path, Some(Uid::from_raw(owner.uid)), Some(Gid::from_raw(owner.gid)),
                 FchownatFlags::AT_SYMLINK_NOFOLLOW,
-            ).map_err(|e| format!("Unable to change {:?} ownership: {}", path, e))?;
+            ).map_err(|e| format!("Unable to change {path:?} ownership: {e}"))?;
         };
 
         if let Some(mode) = self.mode {
             fs::set_permissions(path, Permissions::from_mode(mode)).map_err(|e| format!(
-                "Unable to change {:?} permissions: {}", path, e))?;
+                "Unable to change {path:?} permissions: {e}"))?;
         }
 
         let time = FileTime::from_unix_time(self.mtime, 0);
         filetime::set_symlink_file_times(path, time, time).map_err(|e| format!(
-            "Unable to change {:?} modification time: {}", path, e))?;
+            "Unable to change {path:?} modification time: {e}"))?;
 
         Ok(())
     }

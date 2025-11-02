@@ -156,7 +156,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
         (File::from(read_fd), File::from(write_fd))
     })?;
 
-    fcntl::fcntl(read_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
+    fcntl::fcntl(&read_fd, fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::empty()))?;
 
     Ok((read_fd, write_fd))
 }
@@ -167,7 +167,7 @@ fn create_passphrase_pipe() -> nix::Result<(File, File)> {
         (File::from(read_fd), File::from(write_fd))
     })?;
 
-    fcntl::fcntl(write_fd.as_raw_fd(), fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::FD_CLOEXEC))?;
+    fcntl::fcntl(&write_fd, fcntl::FcntlArg::F_SETFD(fcntl::FdFlag::FD_CLOEXEC))?;
 
     Ok((read_fd, write_fd))
 }
@@ -239,7 +239,7 @@ fn terminate_gpg(pid: pid_t) {
 }
 
 fn io_error_from<T: ToString>(error: T) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, error.to_string())
+    io::Error::other(error.to_string())
 }
 
 fn clone_empty_result(result: &EmptyResult) -> EmptyResult {

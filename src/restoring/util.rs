@@ -95,7 +95,7 @@ pub fn restore_directories<R, P>(restore_dir: R, file_path: P) -> GenericResult<
                 },
                 ErrorKind::AlreadyExists => {
                     break;
-                }
+                },
                 _ => return Err!("Unable to create {:?}: {}", restore_path, err),
             }
         }

@@ -20,7 +20,7 @@ pub struct FileReader<'a> {
 }
 
 impl FileReader<'_> {
-    pub fn new(file: &mut dyn Read, size: u64) -> FileReader {
+    pub fn new(file: &mut dyn Read, size: u64) -> FileReader<'_> {
         FileReader {
             file,
             digest: Digest::new(),

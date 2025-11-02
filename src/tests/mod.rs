@@ -361,10 +361,8 @@ impl FileState {
             fs::write(path, &contents)?;
             Some((contents, fs::metadata(path)?.modified()?))
         } else {
-            if let Err(err) = fs::remove_file(path) {
-                if err.kind() != ErrorKind::NotFound {
-                    return Err(err.into());
-                }
+            if let Err(err) = fs::remove_file(path) && err.kind() != ErrorKind::NotFound {
+                return Err(err.into());
             }
             None
         };
@@ -392,10 +390,8 @@ impl FileState {
             fs::write(&self.path, contents)?;
             filetime::set_file_mtime(&self.path, FileTime::from_system_time(modify_time))?;
         } else {
-            if let Err(err) = fs::remove_file(&self.path) {
-                if err.kind() != ErrorKind::NotFound {
-                    return Err(err.into());
-                }
+            if let Err(err) = fs::remove_file(&self.path) && err.kind() != ErrorKind::NotFound {
+                return Err(err.into());
             }
         };
 

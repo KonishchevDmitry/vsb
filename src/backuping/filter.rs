@@ -4,7 +4,6 @@ use std::path::Path;
 use cow_utils::CowUtils;
 use globset::{GlobBuilder, GlobMatcher};
 use serde::{Deserialize, Serialize, Serializer};
-#[cfg(test)] use serde_derive::Deserialize;
 use serde::de::{Deserializer, Error};
 
 use crate::core::GenericResult;

@@ -25,7 +25,7 @@ pub struct Backuper<'a> {
 }
 
 impl Backuper<'_> {
-    pub fn new(config: &BackupConfig, backup: BackupInstance) -> GenericResult<Backuper> {
+    pub fn new(config: &BackupConfig, backup: BackupInstance) -> GenericResult<Backuper<'_>> {
         Ok(Backuper {
             backup,
             items: &config.items,

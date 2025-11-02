@@ -66,8 +66,7 @@ impl StreamReader {
 impl io::Read for StreamReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let (empty, size) = {
-            let data = self.get_current_chunk().map_err(|e|
-                io::Error::new(io::ErrorKind::Other, e))?;
+            let data = self.get_current_chunk().map_err(io::Error::other)?;
 
             let data: &mut Bytes = match data {
                 Some(data) => data,

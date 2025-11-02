@@ -236,7 +236,7 @@ impl GoogleDrive {
         self.oauth.authenticate(request, "Bearer").map_err(|e| GoogleDriveError::Oauth(e.to_string()))
     }
 
-    fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<R, GoogleDriveApiError>, GoogleDriveError>
+    fn api_request<R>(&self, method: Method, path: &str) -> Result<HttpRequest<'_, R, GoogleDriveApiError>, GoogleDriveError>
         where R: de::DeserializeOwned + 'static
     {
         self.authenticate(
@@ -246,7 +246,7 @@ impl GoogleDrive {
         )
     }
 
-    fn delete_request(&self, path: &str) -> Result<HttpRequest<HttpResponse, GoogleDriveApiError>, GoogleDriveError> {
+    fn delete_request(&self, path: &str) -> Result<HttpRequest<'_, HttpResponse, GoogleDriveApiError>, GoogleDriveError> {
         self.authenticate(
             HttpRequest::new(
                 Method::DELETE, API_ENDPOINT.to_owned() + path,
@@ -255,7 +255,7 @@ impl GoogleDrive {
         )
     }
 
-    fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<GoogleDriveFile, GoogleDriveApiError> {
+    fn file_upload_request(&self, location: String, timeout: u64) -> HttpRequest<'_, GoogleDriveFile, GoogleDriveApiError> {
         HttpRequest::new_json(Method::PUT, location, Duration::from_secs(timeout))
     }
 }
