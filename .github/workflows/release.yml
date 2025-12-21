@@ -17,16 +17,13 @@ jobs:
     strategy:
       matrix:
         include:
-          # See https://bit.ly/github-runners for actual runners
+          # See https://docs.github.com/en/actions/reference/runners/github-hosted-runners for actual runners
 
           - name: Linux
             os: ubuntu-latest
 
-          - name: Intel MacOS
-            os: macos-13
-
-          - name: ARM MacOS
-            os: macos-14
+          - name: MacOS
+            os: macos-latest
 
     steps:
     - uses: actions/checkout@v4
