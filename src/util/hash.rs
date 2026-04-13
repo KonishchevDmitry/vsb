@@ -124,11 +124,12 @@ impl Md5 {
 
 impl Write for Md5 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.hasher.write(buf)
+        self.hasher.update(buf);
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.hasher.flush()
+        Ok(())
     }
 }
 

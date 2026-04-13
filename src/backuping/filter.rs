@@ -5,6 +5,7 @@ use cow_utils::CowUtils;
 use globset::{GlobBuilder, GlobMatcher};
 use serde::{Deserialize, Serialize, Serializer};
 use serde::de::{Deserializer, Error};
+#[cfg(test)] use serde_derive::Deserialize;
 
 use crate::core::GenericResult;
 

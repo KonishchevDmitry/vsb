@@ -70,7 +70,7 @@ impl Read for FileReader<'_> {
 #[cfg(test)]
 mod tests {
     use bytes::Buf;
-    use rand::{Rng, RngCore};
+    use rand::{Rng, RngExt};
     use rayon::prelude::*;
     use super::*;
 
