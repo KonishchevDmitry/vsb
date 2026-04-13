@@ -26,7 +26,7 @@ jobs:
             os: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Configure build target
       run: .github/configure-build-target
@@ -54,7 +54,7 @@ jobs:
         tar -cjf "$name" -C "$build_directory" vsb
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.os }}
         path: ${{ steps.archive.outputs.name }}
@@ -70,7 +70,7 @@ jobs:
 
     steps:
     - name: Download artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: artifacts
         pattern: "*"
