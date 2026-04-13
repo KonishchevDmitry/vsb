@@ -95,7 +95,7 @@ impl HttpClient {
             request = request.body(body);
         }
 
-        let mut response = request.send()?;
+        let mut response = request.send().map_err(humanize_reqwest_error)?;
         let status = response.status();
 
         let mut body = Vec::new();
@@ -149,4 +149,13 @@ impl<T> From<Box<dyn Error + Send + Sync>> for HttpClientError<T> {
     fn from(err: Box<dyn Error + Send + Sync>) -> HttpClientError<T> {
         HttpClientError::Generic(err.to_string())
     }
+}
+
+// reqwest/hyper errors hide all details, so extract the underlying error
+fn humanize_reqwest_error(err: reqwest::Error) -> String {
+    let mut err: &dyn Error = &err;
+    while let Some(source) = err.source() {
+        err = source;
+    }
+    err.to_string()
 }
