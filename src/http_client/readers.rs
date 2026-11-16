@@ -34,12 +34,8 @@ impl<T: de::DeserializeOwned> ResponseReader for JsonReplyReader<T> {
         let content_type = response.get_header(headers::CONTENT_TYPE)?.ok_or_else(|| format!(
             "Server returned {} response without Content-Type", response.status))?;
 
-        Mime::from_str(content_type).ok().and_then(|content_type| {
-            if content_type.type_() == mime::APPLICATION && content_type.subtype() == mime::JSON {
-                Some(content_type)
-            } else {
-                None
-            }
+        Mime::from_str(content_type).ok().filter(|content_type| {
+            content_type.type_() == mime::APPLICATION && content_type.subtype() == mime::JSON
         }).ok_or_else(|| format!(
             "Server returned {} response with an invalid content type: {}",
             response.status, content_type
